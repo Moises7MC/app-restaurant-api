@@ -1,0 +1,29 @@
+# Build results
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+
+# Visual Studio
+.vs/
+.vscode/
+*.sln.user
+*.suo
+
+# Dependencies
+packages/
+node_modules/
+
+# Environment variables
+appsettings.Development.json
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
