@@ -35,7 +35,7 @@ app.UseCors("AllowAll");  // ← ANTES de MapControllers
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<OrderHub>("/hubs/orders");
-
+Console.WriteLine($"Connection: {builder.Configuration.GetConnectionString("DefaultConnection")}");
 // Seed de productos
 try
 {
