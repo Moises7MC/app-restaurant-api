@@ -15,7 +15,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", builder =>
     {
-        builder.WithOrigins("http://localhost:4200")
+        builder.WithOrigins(
+                "http://localhost:4200",
+                "https://chef-dashboard-seven.vercel.app"
+               )
                .AllowAnyMethod()
                .AllowAnyHeader()
                .AllowCredentials();
