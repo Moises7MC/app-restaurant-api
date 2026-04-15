@@ -88,7 +88,6 @@ namespace AppRestaurantAPI.Controllers
         // ════════════════════════════════════
 
         // POST: api/order
-        // POST: api/order
         [HttpPost]
         public async Task<ActionResult<Order>> CreateOrder(Order order)
         {
@@ -264,6 +263,14 @@ namespace AppRestaurantAPI.Controllers
             item.OrderId = orderId;
             _context.OrderItems.Add(item);
             await _context.SaveChangesAsync();
+
+            // ← AGREGA ESTO: recargar orden completa y notificar cocina
+            var orderWithItems = await _context.Orders
+                .Include(o => o.Items)
+                .ThenInclude(oi => oi.Product)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+
+            await _hubContext.Clients.Group("Cocina").SendAsync("ActualizacionPedido", orderWithItems);
 
             return CreatedAtAction(nameof(GetOrder), new { id = orderId }, item);
         }
