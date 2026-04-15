@@ -141,7 +141,11 @@ namespace AppRestaurantAPI.Controllers
                     {
                         OrderId = orderToUse.Id,
                         Action = "Agregado",
-                        ItemsAdded = JsonConvert.SerializeObject(order.Items),
+                        // Primera (cuando hay orden existente):
+                        ItemsAdded = JsonConvert.SerializeObject(order.Items, new JsonSerializerSettings
+                        {
+                            ReferenceLoopHandling = ReferenceLoopHandling.Ignore
+                        }),
                         CreatedAt = DateTime.UtcNow
                     };
                     _context.OrderHistories.Add(historyEntry);
@@ -168,7 +172,11 @@ namespace AppRestaurantAPI.Controllers
                     {
                         OrderId = orderToUse.Id,
                         Action = "Inicial",
-                        ItemsAdded = JsonConvert.SerializeObject(order.Items),
+                        //ItemsAdded = JsonConvert.SerializeObject(order.Items),
+                        ItemsAdded = JsonConvert.SerializeObject(order.Items, new JsonSerializerSettings
+                        {
+                            ReferenceLoopHandling = ReferenceLoopHandling.Ignore
+                        }),
                         CreatedAt = orderToUse.CreatedAt
                     };
                     _context.OrderHistories.Add(historyEntry);
@@ -179,7 +187,7 @@ namespace AppRestaurantAPI.Controllers
                 var orderWithItems = await _context.Orders
                     .Include(o => o.Items)
                     .ThenInclude(oi => oi.Product)
-                    .Include(o => o.History)
+                    //.Include(o => o.History)
                     .FirstOrDefaultAsync(o => o.Id == orderToUse.Id);
 
                 if (orderWithItems == null)
