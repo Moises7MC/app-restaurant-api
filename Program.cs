@@ -4,9 +4,11 @@ using AppRestaurantAPI.Models;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+
 builder.Services.AddControllers();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -38,14 +40,33 @@ app.UseCors("AllowAll");  // ← ANTES de MapControllers
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<OrderHub>("/hubs/orders");
-Console.WriteLine($"Connection: {builder.Configuration.GetConnectionString("DefaultConnection")}");
-// Seed de productos
+
+Console.WriteLine($"🔗 Conexión BD: {builder.Configuration.GetConnectionString("DefaultConnection")}");
+
+// ✅ APLICAR MIGRACIONES
 try
 {
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        db.Database.EnsureCreated();
+
+        // Aplica las migraciones
+        db.Database.Migrate();
+        Console.WriteLine("✓ Migraciones aplicadas correctamente");
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"✗ Error en migraciones: {ex.Message}");
+}
+
+// ✅ SEED DE PRODUCTOS
+try
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
         if (!db.Products.Any())
         {
             db.Products.AddRange(
@@ -56,12 +77,13 @@ try
                 new Product { Name = "Lomo saltado", Price = 150, Category = "Almuerzo", Description = "Lomo de res saltado", ImageUrl = "lomo.jpg" }
             );
             db.SaveChanges();
+            Console.WriteLine("✓ Productos seeded correctamente");
         }
     }
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"Error al conectar BD: {ex.Message}");
+    Console.WriteLine($"✗ Error al seedear productos: {ex.Message}");
 }
 
 app.Run();

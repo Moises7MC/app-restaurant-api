@@ -3,6 +3,7 @@ using System;
 using AppRestaurantAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AppRestaurantAPI.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260411033657_AddComandaToOrder")]
+    partial class AddComandaToOrder
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -56,35 +59,6 @@ namespace AppRestaurantAPI.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Orders");
-                });
-
-            modelBuilder.Entity("AppRestaurantAPI.Models.OrderHistory", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ItemsAdded")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("OrderId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrderId");
-
-                    b.ToTable("OrderHistories");
                 });
 
             modelBuilder.Entity("AppRestaurantAPI.Models.OrderItem", b =>
@@ -207,17 +181,6 @@ namespace AppRestaurantAPI.Migrations
                     b.ToTable("Transactions");
                 });
 
-            modelBuilder.Entity("AppRestaurantAPI.Models.OrderHistory", b =>
-                {
-                    b.HasOne("AppRestaurantAPI.Models.Order", "Order")
-                        .WithMany("History")
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("AppRestaurantAPI.Models.OrderItem", b =>
                 {
                     b.HasOne("AppRestaurantAPI.Models.Order", "Order")
@@ -239,8 +202,6 @@ namespace AppRestaurantAPI.Migrations
 
             modelBuilder.Entity("AppRestaurantAPI.Models.Order", b =>
                 {
-                    b.Navigation("History");
-
                     b.Navigation("Items");
                 });
 #pragma warning restore 612, 618
