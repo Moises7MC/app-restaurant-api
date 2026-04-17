@@ -26,7 +26,6 @@ namespace AppRestaurantAPI.Controllers
         // RUTAS ESPECÍFICAS (van primero)
         // ════════════════════════════════════
 
-        // GET: api/order/table/2
         [HttpGet("table/{tableNumber}")]
         public async Task<ActionResult<IEnumerable<Order>>> GetOrdersByTable(int tableNumber)
         {
@@ -37,7 +36,6 @@ namespace AppRestaurantAPI.Controllers
                 .ToListAsync();
         }
 
-        // GET: api/order/5/comprobante
         [HttpGet("{id}/comprobante")]
         public IActionResult DescargarComprobante(int id)
         {
@@ -61,7 +59,6 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // GET: api/order/5/history
         [HttpGet("{id}/history")]
         public async Task<ActionResult<IEnumerable<OrderHistory>>> GetOrderHistory(int id)
         {
@@ -84,10 +81,149 @@ namespace AppRestaurantAPI.Controllers
         }
 
         // ════════════════════════════════════
-        // RUTAS GENÉRICAS (van después)
+        // NUEVO: Modificar cantidad de un item
+        // PUT: api/order/{orderId}/item/{itemId}
+        // Body: { "quantity": 2 }
+        // ════════════════════════════════════
+        [HttpPut("{orderId}/item/{itemId}")]
+        public async Task<IActionResult> UpdateItemQuantity(
+            int orderId, int itemId, [FromBody] UpdateItemRequest request)
+        {
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.Items)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null)
+                    return NotFound("Orden no encontrada");
+
+                if (order.Status == "Listo")
+                    return BadRequest("No se puede modificar una orden ya lista");
+
+                var item = order.Items?.FirstOrDefault(i => i.Id == itemId);
+                if (item == null)
+                    return NotFound("Item no encontrado");
+
+                var oldQuantity = item.Quantity;
+                var productName = item.Product?.Name ?? $"Producto #{item.ProductId}";
+
+                // Recalcular total
+                var diff = (request.Quantity - oldQuantity) * item.UnitPrice;
+                order.Total += diff;
+                order.UpdatedAt = DateTime.UtcNow;
+
+                item.Quantity = request.Quantity;
+                _context.Update(item);
+                _context.Update(order);
+
+                // Historial
+                var historyEntry = new OrderHistory
+                {
+                    OrderId = orderId,
+                    Action = "Modificado",
+                    ItemsAdded = JsonConvert.SerializeObject(new[] { new
+                    {
+                        productId   = item.ProductId,
+                        productName = productName,
+                        oldQuantity = oldQuantity,
+                        quantity    = request.Quantity,
+                        unitPrice   = item.UnitPrice
+                    }}),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.OrderHistories.Add(historyEntry);
+
+                await _context.SaveChangesAsync();
+
+                var orderWithItems = await _context.Orders
+                    .Include(o => o.Items)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                await _hubContext.Clients.Group("Cocina")
+                    .SendAsync("ActualizacionPedido", orderWithItems);
+
+                return Ok(orderWithItems);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error: {ex.Message}");
+            }
+        }
+
+        // ════════════════════════════════════
+        // NUEVO: Eliminar un item de la orden
+        // DELETE: api/order/{orderId}/item/{itemId}
+        // ════════════════════════════════════
+        [HttpDelete("{orderId}/item/{itemId}")]
+        public async Task<IActionResult> RemoveItemFromOrder(int orderId, int itemId)
+        {
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.Items)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null)
+                    return NotFound("Orden no encontrada");
+
+                if (order.Status == "Listo")
+                    return BadRequest("No se puede modificar una orden ya lista");
+
+                var item = order.Items?.FirstOrDefault(i => i.Id == itemId);
+                if (item == null)
+                    return NotFound("Item no encontrado");
+
+                var productName = item.Product?.Name ?? $"Producto #{item.ProductId}";
+
+                // Restar del total
+                order.Total -= item.Quantity * item.UnitPrice;
+                order.UpdatedAt = DateTime.UtcNow;
+                _context.Update(order);
+
+                _context.OrderItems.Remove(item);
+
+                // Historial
+                var historyEntry = new OrderHistory
+                {
+                    OrderId = orderId,
+                    Action = "Cancelado",
+                    ItemsAdded = JsonConvert.SerializeObject(new[] { new
+                    {
+                        productId   = item.ProductId,
+                        productName = productName,
+                        quantity    = item.Quantity,
+                        unitPrice   = item.UnitPrice
+                    }}),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.OrderHistories.Add(historyEntry);
+
+                await _context.SaveChangesAsync();
+
+                var orderWithItems = await _context.Orders
+                    .Include(o => o.Items)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                await _hubContext.Clients.Group("Cocina")
+                    .SendAsync("ActualizacionPedido", orderWithItems);
+
+                return Ok(orderWithItems);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error: {ex.Message}");
+            }
+        }
+
+        // ════════════════════════════════════
+        // RUTAS GENÉRICAS
         // ════════════════════════════════════
 
-        // POST: api/order
         [HttpPost]
         public async Task<ActionResult<Order>> CreateOrder(Order order)
         {
@@ -107,9 +243,6 @@ namespace AppRestaurantAPI.Controllers
                 if (lastOrderToday != null &&
                     (lastOrderToday.Status == "Pendiente" || lastOrderToday.Status == "Enviado a cocina"))
                 {
-                    // ✅ SERIALIZAR ANTES DE MUTAR
-                    // Capturamos solo los datos limpios de los items nuevos
-                    // ANTES de que el foreach los modifique (asignando OrderId, etc.)
                     var itemsSnapshot = order.Items?.Select(i => new
                     {
                         productId = i.ProductId,
@@ -119,7 +252,6 @@ namespace AppRestaurantAPI.Controllers
 
                     var itemsAddedJson = JsonConvert.SerializeObject(itemsSnapshot);
 
-                    // Recarga con items
                     lastOrderToday = await _context.Orders
                         .Include(o => o.Items)
                         .FirstOrDefaultAsync(o => o.Id == lastOrderToday.Id);
@@ -131,7 +263,8 @@ namespace AppRestaurantAPI.Controllers
                     {
                         foreach (var item in order.Items)
                         {
-                            var existingItem = lastOrderToday.Items?.FirstOrDefault(i => i.ProductId == item.ProductId);
+                            var existingItem = lastOrderToday.Items?
+                                .FirstOrDefault(i => i.ProductId == item.ProductId);
                             if (existingItem != null)
                             {
                                 existingItem.Quantity += item.Quantity;
@@ -147,7 +280,6 @@ namespace AppRestaurantAPI.Controllers
 
                     _context.Update(orderToUse);
 
-                    // Usar el JSON limpio serializado antes del foreach
                     var historyEntry = new OrderHistory
                     {
                         OrderId = orderToUse.Id,
@@ -163,9 +295,7 @@ namespace AppRestaurantAPI.Controllers
                     isNewOrder = true;
 
                     if (lastOrderToday != null)
-                    {
                         order.Comanda = (char)(lastOrderToday.Comanda + 1);
-                    }
 
                     _context.Orders.Add(order);
                     orderToUse = order;
@@ -175,7 +305,6 @@ namespace AppRestaurantAPI.Controllers
 
                 if (isNewOrder)
                 {
-                    // Para la orden inicial también serializamos limpio
                     var itemsSnapshot = order.Items?.Select(i => new
                     {
                         productId = i.ProductId,
@@ -194,7 +323,6 @@ namespace AppRestaurantAPI.Controllers
                     await _context.SaveChangesAsync();
                 }
 
-                // Recarga COMPLETA la orden
                 var orderWithItems = await _context.Orders
                     .Include(o => o.Items)
                     .ThenInclude(oi => oi.Product)
@@ -213,7 +341,8 @@ namespace AppRestaurantAPI.Controllers
                     Console.WriteLine($"✗ Error generando PDF: {ex.Message}");
                 }
 
-                await _hubContext.Clients.Group("Cocina").SendAsync("ActualizacionPedido", orderWithItems);
+                await _hubContext.Clients.Group("Cocina")
+                    .SendAsync("ActualizacionPedido", orderWithItems);
 
                 return CreatedAtAction(nameof(GetOrder), new { id = orderWithItems.Id }, orderWithItems);
             }
@@ -222,12 +351,10 @@ namespace AppRestaurantAPI.Controllers
                 Console.WriteLine($"❌ Error en CreateOrder: {ex.Message}");
                 if (ex.InnerException != null)
                     Console.WriteLine($"❌ Inner: {ex.InnerException.Message}");
-
                 return BadRequest($"Error: {ex.Message}");
             }
         }
 
-        // GET: api/order
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Order>>> GetOrders()
         {
@@ -235,11 +362,9 @@ namespace AppRestaurantAPI.Controllers
                 .Include(o => o.Items)
                 .ThenInclude(oi => oi.Product)
                 .Include(o => o.History);
-
             return await query.ToListAsync();
         }
 
-        // GET: api/order/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Order>> GetOrder(int id)
         {
@@ -254,7 +379,6 @@ namespace AppRestaurantAPI.Controllers
             return order;
         }
 
-        // POST: api/order/5/item
         [HttpPost("{orderId}/item")]
         public async Task<ActionResult<OrderItem>> AddItemToOrder(int orderId, OrderItem item)
         {
@@ -271,12 +395,12 @@ namespace AppRestaurantAPI.Controllers
                 .ThenInclude(oi => oi.Product)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
-            await _hubContext.Clients.Group("Cocina").SendAsync("ActualizacionPedido", orderWithItems);
+            await _hubContext.Clients.Group("Cocina")
+                .SendAsync("ActualizacionPedido", orderWithItems);
 
             return CreatedAtAction(nameof(GetOrder), new { id = orderId }, item);
         }
 
-        // PUT: api/order/5
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateOrder(int id, Order order)
         {
@@ -285,11 +409,9 @@ namespace AppRestaurantAPI.Controllers
 
             _context.Entry(order).State = EntityState.Modified;
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // PUT: api/order/5/status
         [HttpPut("{id}/status")]
         public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] string status)
         {
@@ -301,11 +423,9 @@ namespace AppRestaurantAPI.Controllers
             order.UpdatedAt = DateTime.UtcNow;
             _context.Entry(order).State = EntityState.Modified;
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // DELETE: api/order/5
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteOrder(int id)
         {
@@ -315,11 +435,9 @@ namespace AppRestaurantAPI.Controllers
 
             _context.Orders.Remove(order);
             await _context.SaveChangesAsync();
-
             return NoContent();
         }
 
-        // POST: api/order/{orderId}/items-batch
         [HttpPost("{orderId}/items-batch")]
         public async Task<ActionResult> AddItemsBatchToOrder(int orderId, List<OrderItem> items)
         {
@@ -330,7 +448,6 @@ namespace AppRestaurantAPI.Controllers
             if (order == null)
                 return NotFound("Orden no encontrada");
 
-            // Snapshot limpio ANTES de mutar
             var snapshot = items.Select(i => new
             {
                 productId = i.ProductId,
@@ -338,7 +455,6 @@ namespace AppRestaurantAPI.Controllers
                 unitPrice = i.UnitPrice
             }).ToList();
 
-            // Agregar o sumar items
             foreach (var item in items)
             {
                 var existing = order.Items?.FirstOrDefault(i => i.ProductId == item.ProductId);
@@ -354,11 +470,9 @@ namespace AppRestaurantAPI.Controllers
                 }
             }
 
-            // Total actualizado
             order.Total += items.Sum(i => i.Quantity * i.UnitPrice);
             _context.Update(order);
 
-            // Una sola entrada de historial para todos los items
             var historyEntry = new OrderHistory
             {
                 OrderId = orderId,
@@ -375,9 +489,16 @@ namespace AppRestaurantAPI.Controllers
                 .ThenInclude(oi => oi.Product)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
-            await _hubContext.Clients.Group("Cocina").SendAsync("ActualizacionPedido", orderWithItems);
+            await _hubContext.Clients.Group("Cocina")
+                .SendAsync("ActualizacionPedido", orderWithItems);
 
             return Ok(orderWithItems);
         }
+    }
+
+    // DTO para recibir la nueva cantidad en UpdateItemQuantity
+    public class UpdateItemRequest
+    {
+        public int Quantity { get; set; }
     }
 }
