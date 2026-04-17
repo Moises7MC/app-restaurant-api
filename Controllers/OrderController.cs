@@ -95,7 +95,6 @@ namespace AppRestaurantAPI.Controllers
             {
                 var today = DateTime.UtcNow.Date;
 
-                // ✅ SIN includes en esta primera query
                 var lastOrderToday = await _context.Orders
                     .Where(o => o.TableNumber == order.TableNumber &&
                                 o.CreatedAt.Date == today)
@@ -108,6 +107,18 @@ namespace AppRestaurantAPI.Controllers
                 if (lastOrderToday != null &&
                     (lastOrderToday.Status == "Pendiente" || lastOrderToday.Status == "Enviado a cocina"))
                 {
+                    // ✅ SERIALIZAR ANTES DE MUTAR
+                    // Capturamos solo los datos limpios de los items nuevos
+                    // ANTES de que el foreach los modifique (asignando OrderId, etc.)
+                    var itemsSnapshot = order.Items?.Select(i => new
+                    {
+                        productId = i.ProductId,
+                        quantity = i.Quantity,
+                        unitPrice = i.UnitPrice
+                    }).ToList();
+
+                    var itemsAddedJson = JsonConvert.SerializeObject(itemsSnapshot);
+
                     // Recarga con items
                     lastOrderToday = await _context.Orders
                         .Include(o => o.Items)
@@ -136,15 +147,12 @@ namespace AppRestaurantAPI.Controllers
 
                     _context.Update(orderToUse);
 
+                    // Usar el JSON limpio serializado antes del foreach
                     var historyEntry = new OrderHistory
                     {
                         OrderId = orderToUse.Id,
                         Action = "Agregado",
-                        // Primera (cuando hay orden existente):
-                        ItemsAdded = JsonConvert.SerializeObject(order.Items, new JsonSerializerSettings
-                        {
-                            ReferenceLoopHandling = ReferenceLoopHandling.Ignore
-                        }),
+                        ItemsAdded = itemsAddedJson,
                         CreatedAt = DateTime.UtcNow
                     };
                     _context.OrderHistories.Add(historyEntry);
@@ -167,26 +175,29 @@ namespace AppRestaurantAPI.Controllers
 
                 if (isNewOrder)
                 {
+                    // Para la orden inicial también serializamos limpio
+                    var itemsSnapshot = order.Items?.Select(i => new
+                    {
+                        productId = i.ProductId,
+                        quantity = i.Quantity,
+                        unitPrice = i.UnitPrice
+                    }).ToList();
+
                     var historyEntry = new OrderHistory
                     {
                         OrderId = orderToUse.Id,
                         Action = "Inicial",
-                        //ItemsAdded = JsonConvert.SerializeObject(order.Items),
-                        ItemsAdded = JsonConvert.SerializeObject(order.Items, new JsonSerializerSettings
-                        {
-                            ReferenceLoopHandling = ReferenceLoopHandling.Ignore
-                        }),
+                        ItemsAdded = JsonConvert.SerializeObject(itemsSnapshot),
                         CreatedAt = orderToUse.CreatedAt
                     };
                     _context.OrderHistories.Add(historyEntry);
                     await _context.SaveChangesAsync();
                 }
 
-                // ✅ Recarga COMPLETA la orden
+                // Recarga COMPLETA la orden
                 var orderWithItems = await _context.Orders
                     .Include(o => o.Items)
                     .ThenInclude(oi => oi.Product)
-                    //.Include(o => o.History)
                     .FirstOrDefaultAsync(o => o.Id == orderToUse.Id);
 
                 if (orderWithItems == null)
@@ -209,14 +220,8 @@ namespace AppRestaurantAPI.Controllers
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Error en CreateOrder: {ex.Message}");
-                Console.WriteLine($"Stack: {ex.StackTrace}");
-
-                // ← AGREGAR ESTO
                 if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"❌ Inner Exception: {ex.InnerException.Message}");
-                    Console.WriteLine($"Stack Inner: {ex.InnerException.StackTrace}");
-                }
+                    Console.WriteLine($"❌ Inner: {ex.InnerException.Message}");
 
                 return BadRequest($"Error: {ex.Message}");
             }
@@ -230,9 +235,6 @@ namespace AppRestaurantAPI.Controllers
                 .Include(o => o.Items)
                 .ThenInclude(oi => oi.Product)
                 .Include(o => o.History);
-
-            // Imprime el SQL generado
-            Console.WriteLine(query.ToQueryString());
 
             return await query.ToListAsync();
         }
@@ -264,7 +266,6 @@ namespace AppRestaurantAPI.Controllers
             _context.OrderItems.Add(item);
             await _context.SaveChangesAsync();
 
-            // ← AGREGA ESTO: recargar orden completa y notificar cocina
             var orderWithItems = await _context.Orders
                 .Include(o => o.Items)
                 .ThenInclude(oi => oi.Product)
@@ -316,6 +317,67 @@ namespace AppRestaurantAPI.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        // POST: api/order/{orderId}/items-batch
+        [HttpPost("{orderId}/items-batch")]
+        public async Task<ActionResult> AddItemsBatchToOrder(int orderId, List<OrderItem> items)
+        {
+            var order = await _context.Orders
+                .Include(o => o.Items)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+
+            if (order == null)
+                return NotFound("Orden no encontrada");
+
+            // Snapshot limpio ANTES de mutar
+            var snapshot = items.Select(i => new
+            {
+                productId = i.ProductId,
+                quantity = i.Quantity,
+                unitPrice = i.UnitPrice
+            }).ToList();
+
+            // Agregar o sumar items
+            foreach (var item in items)
+            {
+                var existing = order.Items?.FirstOrDefault(i => i.ProductId == item.ProductId);
+                if (existing != null)
+                {
+                    existing.Quantity += item.Quantity;
+                    _context.Update(existing);
+                }
+                else
+                {
+                    item.OrderId = orderId;
+                    _context.OrderItems.Add(item);
+                }
+            }
+
+            // Total actualizado
+            order.Total += items.Sum(i => i.Quantity * i.UnitPrice);
+            _context.Update(order);
+
+            // Una sola entrada de historial para todos los items
+            var historyEntry = new OrderHistory
+            {
+                OrderId = orderId,
+                Action = "Agregado",
+                ItemsAdded = JsonConvert.SerializeObject(snapshot),
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.OrderHistories.Add(historyEntry);
+
+            await _context.SaveChangesAsync();
+
+            var orderWithItems = await _context.Orders
+                .Include(o => o.Items)
+                .ThenInclude(oi => oi.Product)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+
+            await _hubContext.Clients.Group("Cocina").SendAsync("ActualizacionPedido", orderWithItems);
+
+            return Ok(orderWithItems);
         }
     }
 }
