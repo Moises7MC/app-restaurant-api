@@ -16,4 +16,5 @@ public class Order
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
     public char Comanda { get; set; } = 'A';
+    public string? WaiterName { get; set; }
 }

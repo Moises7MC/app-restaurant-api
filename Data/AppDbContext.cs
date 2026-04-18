@@ -15,12 +15,12 @@ namespace AppRestaurantAPI.Data
         public DbSet<OrderHistory> OrderHistories { get; set; }
         public DbSet<Transaction> Transactions { get; set; }
         public DbSet<Table> Tables { get; set; }
+        public DbSet<Waiter> Waiters { get; set; }  // ← NUEVO
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // Configurar Order
             modelBuilder.Entity<Order>()
                 .HasMany(o => o.Items)
                 .WithOne(oi => oi.Order)
@@ -33,14 +33,12 @@ namespace AppRestaurantAPI.Data
                 .HasForeignKey(oh => oh.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Configurar OrderItem
             modelBuilder.Entity<OrderItem>()
                 .HasOne(oi => oi.Product)
                 .WithMany()
                 .HasForeignKey(oi => oi.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Configurar OrderHistory (relación inversa)
             modelBuilder.Entity<OrderHistory>()
                 .HasOne(oh => oh.Order)
                 .WithMany(o => o.History)

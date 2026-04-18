@@ -344,6 +344,9 @@ namespace AppRestaurantAPI.Controllers
                 await _hubContext.Clients.Group("Cocina")
                     .SendAsync("ActualizacionPedido", orderWithItems);
 
+                await _hubContext.Clients.Group("Mozos")
+                .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });  
+
                 return CreatedAtAction(nameof(GetOrder), new { id = orderWithItems.Id }, orderWithItems);
             }
             catch (Exception ex)
@@ -421,10 +424,15 @@ namespace AppRestaurantAPI.Controllers
 
             order.Status = status;
             order.UpdatedAt = DateTime.UtcNow;
+            if (status == "Listo" || status == "Cancelado")
+            {
+                await _hubContext.Clients.Group("Mozos")
+                    .SendAsync("MesaCambio", new { tableNumber = order.TableNumber, isOccupied = false });
+            }
             _context.Entry(order).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
-        }
+        }   
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteOrder(int id)
