@@ -28,7 +28,7 @@ namespace AppRestaurantAPI.Services
                 doc.Add(new Paragraph(" "));
 
                 // Datos restaurante
-                doc.Add(new Paragraph("RESTAURANTE \"EL SABOR\"",
+                doc.Add(new Paragraph("RESTAURANTE \"COMO EN CASA\"",
                     FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 12)));
                 doc.Add(new Paragraph("RUC: 20123456789"));
                 doc.Add(new Paragraph("Dirección: Calle Principal 123"));
