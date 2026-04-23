@@ -15,6 +15,8 @@ namespace AppRestaurantAPI.Data
         public DbSet<Transaction> Transactions { get; set; }
         public DbSet<Table> Tables { get; set; }
         public DbSet<Waiter> Waiters { get; set; }
+        // ✅ NUEVO
+        public DbSet<DailyEntrada> DailyEntradas { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -49,6 +51,10 @@ namespace AppRestaurantAPI.Data
                 .WithMany(o => o.History)
                 .HasForeignKey(oh => oh.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ índice por fecha para consultas rápidas
+            modelBuilder.Entity<DailyEntrada>()
+                .HasIndex(e => e.Date);
         }
     }
 }

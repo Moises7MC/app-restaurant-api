@@ -87,7 +87,7 @@ namespace AppRestaurantAPI.Controllers
         // ════════════════════════════════════
         [HttpPut("{orderId}/item/{itemId}")]
         public async Task<IActionResult> UpdateItemQuantity(
-            int orderId, int itemId, [FromBody] UpdateItemRequest request)
+    int orderId, int itemId, [FromBody] UpdateItemRequest request)
         {
             try
             {
@@ -113,24 +113,47 @@ namespace AppRestaurantAPI.Controllers
                 var diff = (request.Quantity - oldQuantity) * item.UnitPrice;
                 order.Total += diff;
                 order.UpdatedAt = DateTime.UtcNow;
-
                 item.Quantity = request.Quantity;
                 _context.Update(item);
                 _context.Update(order);
 
-                // Historial
+                // ✅ Calcular en qué ronda normal estaba este producto
+                var allHistory = await _context.OrderHistories
+                    .Where(h => h.OrderId == orderId)
+                    .OrderBy(h => h.CreatedAt)
+                    .ToListAsync();
+
+                int roundNumber = 1;
+                int normalRound = 0;
+                foreach (var h in allHistory)
+                {
+                    if (h.Action == "Inicial" || h.Action == "Agregado")
+                    {
+                        normalRound++;
+                        // Ver si este producto estaba en esta ronda
+                        try
+                        {
+                            var items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
+                            bool found = items?.Any(i => (int)i.productId == item.ProductId) ?? false;
+                            if (found) roundNumber = normalRound;
+                        }
+                        catch { }
+                    }
+                }
+
                 var historyEntry = new OrderHistory
                 {
                     OrderId = orderId,
                     Action = "Modificado",
+                    RoundNumber = roundNumber,
                     ItemsAdded = JsonConvert.SerializeObject(new[] { new
-                    {
-                        productId   = item.ProductId,
-                        productName = productName,
-                        oldQuantity = oldQuantity,
-                        quantity    = request.Quantity,
-                        unitPrice   = item.UnitPrice
-                    }}),
+            {
+                productId   = item.ProductId,
+                productName = productName,
+                oldQuantity = oldQuantity,
+                quantity    = request.Quantity,
+                unitPrice   = item.UnitPrice
+            }}),
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.OrderHistories.Add(historyEntry);
@@ -152,7 +175,6 @@ namespace AppRestaurantAPI.Controllers
                 return BadRequest($"Error: {ex.Message}");
             }
         }
-
         // ════════════════════════════════════
         // NUEVO: Eliminar un item de la orden
         // DELETE: api/order/{orderId}/item/{itemId}
@@ -179,25 +201,46 @@ namespace AppRestaurantAPI.Controllers
 
                 var productName = item.Product?.Name ?? $"Producto #{item.ProductId}";
 
-                // Restar del total
                 order.Total -= item.Quantity * item.UnitPrice;
                 order.UpdatedAt = DateTime.UtcNow;
                 _context.Update(order);
-
                 _context.OrderItems.Remove(item);
 
-                // Historial
+                // ✅ Calcular en qué ronda normal estaba este producto
+                var allHistory = await _context.OrderHistories
+                    .Where(h => h.OrderId == orderId)
+                    .OrderBy(h => h.CreatedAt)
+                    .ToListAsync();
+
+                int roundNumber = 1;
+                int normalRound = 0;
+                foreach (var h in allHistory)
+                {
+                    if (h.Action == "Inicial" || h.Action == "Agregado")
+                    {
+                        normalRound++;
+                        try
+                        {
+                            var items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
+                            bool found = items?.Any(i => (int)i.productId == item.ProductId) ?? false;
+                            if (found) roundNumber = normalRound;
+                        }
+                        catch { }
+                    }
+                }
+
                 var historyEntry = new OrderHistory
                 {
                     OrderId = orderId,
                     Action = "Cancelado",
+                    RoundNumber = roundNumber,
                     ItemsAdded = JsonConvert.SerializeObject(new[] { new
-                    {
-                        productId   = item.ProductId,
-                        productName = productName,
-                        quantity    = item.Quantity,
-                        unitPrice   = item.UnitPrice
-                    }}),
+            {
+                productId   = item.ProductId,
+                productName = productName,
+                quantity    = item.Quantity,
+                unitPrice   = item.UnitPrice
+            }}),
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.OrderHistories.Add(historyEntry);
