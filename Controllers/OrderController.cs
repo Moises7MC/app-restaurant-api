@@ -284,6 +284,8 @@ namespace AppRestaurantAPI.Controllers
                 bool isNewOrder = false;
 
                 if (lastOrderToday != null &&
+                    !order.IsParaLlevar &&
+                    !lastOrderToday.IsParaLlevar &&
                     (lastOrderToday.Status == "Pendiente" || lastOrderToday.Status == "Enviado a cocina"))
                 {
                     var itemsSnapshot = order.Items?.Select(i => new

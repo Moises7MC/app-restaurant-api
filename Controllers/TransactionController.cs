@@ -122,7 +122,9 @@ namespace AppRestaurantAPI.Controllers
             _context.Transactions.Add(transaction);
 
             // Marcar orden como cobrada
-            order.Status = "Cobrado";
+            // Marcar orden como cobrada
+            //order.Status = order.TableNumber == 0 ? "Enviado a cocina" : "Cobrado";
+            order.Status = (order.TableNumber == 0 || order.IsParaLlevar) ? "Enviado a cocina" : "Cobrado";
             order.UpdatedAt = DateTime.UtcNow;
             _context.Update(order);
 

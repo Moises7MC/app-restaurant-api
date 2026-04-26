@@ -84,6 +84,7 @@ try
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+
         // Seed de categorías si no existen
         if (!db.Categories.Any())
         {
