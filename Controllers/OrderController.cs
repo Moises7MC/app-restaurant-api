@@ -81,9 +81,8 @@ namespace AppRestaurantAPI.Controllers
         }
 
         // ════════════════════════════════════
-        // NUEVO: Modificar cantidad de un item
+        // Modificar cantidad de un item
         // PUT: api/order/{orderId}/item/{itemId}
-        // Body: { "quantity": 2 }
         // ════════════════════════════════════
         [HttpPut("{orderId}/item/{itemId}")]
         public async Task<IActionResult> UpdateItemQuantity(
@@ -175,8 +174,9 @@ namespace AppRestaurantAPI.Controllers
                 return BadRequest($"Error: {ex.Message}");
             }
         }
+
         // ════════════════════════════════════
-        // NUEVO: Eliminar un item de la orden
+        // Eliminar un item de la orden
         // DELETE: api/order/{orderId}/item/{itemId}
         // ════════════════════════════════════
         [HttpDelete("{orderId}/item/{itemId}")]
@@ -274,19 +274,22 @@ namespace AppRestaurantAPI.Controllers
             {
                 var today = DateTime.UtcNow.Date;
 
+                // ✅ Buscamos la última orden de la misma mesa+tipo (normal o para llevar)
+                //    Que esté pendiente o enviada a cocina (no listo, no cobrado, no cancelado).
                 var lastOrderToday = await _context.Orders
                     .Where(o => o.TableNumber == order.TableNumber &&
-                                o.CreatedAt.Date == today)
+                                o.CreatedAt.Date == today &&
+                                o.IsParaLlevar == order.IsParaLlevar &&  // ← mismo tipo
+                                (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .OrderByDescending(o => o.Id)
                     .FirstOrDefaultAsync();
 
                 Order orderToUse;
                 bool isNewOrder = false;
 
-                if (lastOrderToday != null &&
-                    !order.IsParaLlevar &&
-                    !lastOrderToday.IsParaLlevar &&
-                    (lastOrderToday.Status == "Pendiente" || lastOrderToday.Status == "Enviado a cocina"))
+                // ✅ Si existe orden previa del mismo tipo, acumular en ella.
+                //    Aplica tanto a mesas normales como a "Para llevar".
+                if (lastOrderToday != null)
                 {
                     var itemsSnapshot = order.Items?.Select(i => new
                     {
@@ -336,11 +339,18 @@ namespace AppRestaurantAPI.Controllers
                 }
                 else
                 {
+                    // No hay orden previa del mismo tipo → crear orden nueva
                     order.Comanda = 'A';
                     isNewOrder = true;
 
-                    if (lastOrderToday != null)
-                        order.Comanda = (char)(lastOrderToday.Comanda + 1);
+                    // Buscar el último Comanda de hoy de cualquier tipo, para asignar el siguiente
+                    var anyLastToday = await _context.Orders
+                        .Where(o => o.CreatedAt.Date == today)
+                        .OrderByDescending(o => o.Id)
+                        .FirstOrDefaultAsync();
+
+                    if (anyLastToday != null)
+                        order.Comanda = (char)(anyLastToday.Comanda + 1);
 
                     _context.Orders.Add(order);
                     orderToUse = order;
@@ -390,7 +400,7 @@ namespace AppRestaurantAPI.Controllers
                     .SendAsync("ActualizacionPedido", orderWithItems);
 
                 await _hubContext.Clients.Group("Mozos")
-                .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });  
+                .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });
 
                 return CreatedAtAction(nameof(GetOrder), new { id = orderWithItems.Id }, orderWithItems);
             }
@@ -477,7 +487,7 @@ namespace AppRestaurantAPI.Controllers
             _context.Entry(order).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
-        }   
+        }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteOrder(int id)

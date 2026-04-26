@@ -121,10 +121,11 @@ namespace AppRestaurantAPI.Controllers
 
             _context.Transactions.Add(transaction);
 
-            // Marcar orden como cobrada
-            // Marcar orden como cobrada
-            //order.Status = order.TableNumber == 0 ? "Enviado a cocina" : "Cobrado";
-            order.Status = (order.TableNumber == 0 || order.IsParaLlevar) ? "Enviado a cocina" : "Cobrado";
+            // ✅ Marcar orden como cobrada.
+            //    Excepción: Venta Directa (tableNumber == 0) se queda en "Enviado a cocina"
+            //    porque allí el cobro ocurre antes de cocinar.
+            //    Para llevar (IsParaLlevar = true) con mesa real SÍ pasa a "Cobrado".
+            order.Status = order.TableNumber == 0 ? "Enviado a cocina" : "Cobrado";
             order.UpdatedAt = DateTime.UtcNow;
             _context.Update(order);
 
