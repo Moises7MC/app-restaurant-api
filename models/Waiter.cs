@@ -10,5 +10,10 @@
         public string Gender { get; set; } = "M"; // M = Masculino, F = Femenino
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // ✅ NUEVO: rol del usuario.
+        //    Valores válidos: "mozo" (default) y "cantador".
+        //    Si en el futuro hay más roles ("chef", "admin"), se agregan aquí.
+        public string Role { get; set; } = "mozo";
     }
 }

@@ -21,10 +21,16 @@ namespace AppRestaurantAPI.Controllers
         }
 
         // GET: api/waiter
+        // Acepta filtro opcional ?role=cantador o ?role=mozo
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<WaiterDto>>> GetWaiters()
+        public async Task<ActionResult<IEnumerable<WaiterDto>>> GetWaiters([FromQuery] string? role = null)
         {
-            var waiters = await _context.Waiters
+            var query = _context.Waiters.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(role))
+                query = query.Where(w => w.Role == role);
+
+            var waiters = await query
                 .OrderByDescending(w => w.CreatedAt)
                 .Select(w => new WaiterDto
                 {
@@ -34,7 +40,8 @@ namespace AppRestaurantAPI.Controllers
                     LastName = w.LastName,
                     Gender = w.Gender,
                     IsActive = w.IsActive,
-                    CreatedAt = w.CreatedAt
+                    CreatedAt = w.CreatedAt,
+                    Role = w.Role  // ✅ NUEVO
                 })
                 .ToListAsync();
 
@@ -56,7 +63,8 @@ namespace AppRestaurantAPI.Controllers
                 LastName = w.LastName,
                 Gender = w.Gender,
                 IsActive = w.IsActive,
-                CreatedAt = w.CreatedAt
+                CreatedAt = w.CreatedAt,
+                Role = w.Role  // ✅ NUEVO
             });
         }
 
@@ -71,6 +79,12 @@ namespace AppRestaurantAPI.Controllers
             if (exists)
                 return BadRequest("El nombre de usuario ya está en uso");
 
+            // ✅ Validar el rol
+            var validRoles = new[] { "mozo", "cantador" };
+            var role = string.IsNullOrWhiteSpace(request.Role) ? "mozo" : request.Role.ToLower().Trim();
+            if (!validRoles.Contains(role))
+                return BadRequest($"Rol inválido. Valores permitidos: {string.Join(", ", validRoles)}");
+
             var waiter = new Waiter
             {
                 Username = request.Username.Trim(),
@@ -79,7 +93,8 @@ namespace AppRestaurantAPI.Controllers
                 LastName = request.LastName.Trim(),
                 Gender = request.Gender,
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                Role = role  // ✅ NUEVO
             };
 
             _context.Waiters.Add(waiter);
@@ -97,7 +112,8 @@ namespace AppRestaurantAPI.Controllers
                 LastName = waiter.LastName,
                 Gender = waiter.Gender,
                 IsActive = waiter.IsActive,
-                CreatedAt = waiter.CreatedAt
+                CreatedAt = waiter.CreatedAt,
+                Role = waiter.Role  // ✅ NUEVO
             });
         }
 
@@ -111,6 +127,7 @@ namespace AppRestaurantAPI.Controllers
             // Verificar username único (excluyendo el mismo usuario)
             var exists = await _context.Waiters
                 .AnyAsync(w => w.Username == request.Username && w.Id != id);
+
             if (exists)
                 return BadRequest("El nombre de usuario ya está en uso");
 
@@ -119,6 +136,16 @@ namespace AppRestaurantAPI.Controllers
             waiter.Username = request.Username.Trim();
             waiter.Gender = request.Gender;
             waiter.IsActive = request.IsActive;
+
+            // ✅ Permitir cambiar el rol
+            if (!string.IsNullOrWhiteSpace(request.Role))
+            {
+                var validRoles = new[] { "mozo", "cantador" };
+                var role = request.Role.ToLower().Trim();
+                if (!validRoles.Contains(role))
+                    return BadRequest($"Rol inválido. Valores permitidos: {string.Join(", ", validRoles)}");
+                waiter.Role = role;
+            }
 
             // Solo actualizar contraseña si se envió una nueva
             if (!string.IsNullOrWhiteSpace(request.Password))
@@ -202,7 +229,8 @@ namespace AppRestaurantAPI.Controllers
                 FirstName = waiter.FirstName,
                 LastName = waiter.LastName,
                 Gender = waiter.Gender,
-                FullName = $"{waiter.FirstName} {waiter.LastName}"
+                FullName = $"{waiter.FirstName} {waiter.LastName}",
+                Role = waiter.Role  // ✅ NUEVO — la app usará este campo para saber qué pantalla mostrar
             });
         }
     }
@@ -219,6 +247,7 @@ namespace AppRestaurantAPI.Controllers
         public string Gender { get; set; } = "M";
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
+        public string Role { get; set; } = "mozo";  // ✅ NUEVO
     }
 
     public class WaiterSessionDto
@@ -229,6 +258,7 @@ namespace AppRestaurantAPI.Controllers
         public string LastName { get; set; } = string.Empty;
         public string Gender { get; set; } = "M";
         public string FullName { get; set; } = string.Empty;
+        public string Role { get; set; } = "mozo";  // ✅ NUEVO
     }
 
     public class CreateWaiterRequest
@@ -238,6 +268,7 @@ namespace AppRestaurantAPI.Controllers
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
         public string Gender { get; set; } = "M";
+        public string? Role { get; set; }  // ✅ NUEVO — opcional, default "mozo"
     }
 
     public class UpdateWaiterRequest
@@ -248,6 +279,7 @@ namespace AppRestaurantAPI.Controllers
         public string LastName { get; set; } = string.Empty;
         public string Gender { get; set; } = "M";
         public bool IsActive { get; set; }
+        public string? Role { get; set; }  // ✅ NUEVO — opcional
     }
 
     public class LoginRequest

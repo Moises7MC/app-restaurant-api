@@ -1,65 +1,62 @@
 ﻿using Microsoft.AspNetCore.SignalR;
+
 namespace AppRestaurantAPI.Hubs
 {
     public class OrderHub : Hub
     {
-        public override async Task OnConnectedAsync()
+        // ═══════════════════════════════════════════════════════════
+        // Grupos existentes:
+        //   - "Cocina"     → web del chef
+        //   - "Mozos"      → app de los mozos (todos)
+        //   - "Mesa_X"     → mozo específico viendo una mesa
+        //   - "Cantadores" → app del cantador (tablet)
+        // ═══════════════════════════════════════════════════════════
+
+        // ───── Grupo Cocina ─────
+        public async Task JoinCocinaGroup()
         {
-            Console.WriteLine($"Cliente conectado: {Context.ConnectionId}");
-            await base.OnConnectedAsync();
-        }
-        public override async Task OnDisconnectedAsync(Exception? exception)
-        {
-            Console.WriteLine($"Cliente desconectado: {Context.ConnectionId}");
-            await base.OnDisconnectedAsync(exception);
+            await Groups.AddToGroupAsync(Context.ConnectionId, "Cocina");
         }
 
+        // ✅ Alias en inglés para la web Angular
         public async Task JoinKitchenGroup()
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, "Cocina");
         }
 
+        // ───── Grupo Mozos ─────
+        public async Task JoinMozosGroup()
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, "Mozos");
+        }
+
+        // ✅ Alias en inglés para la app Flutter
         public async Task JoinWaitersGroup()
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, "Mozos");
-            Console.WriteLine($"Mozo conectado al grupo Mozos: {Context.ConnectionId}");
         }
 
-        public async Task JoinTableGroup(int tableNumber)
+        // ───── Grupo de Mesa específica ─────
+        public async Task JoinMesaGroup(int tableNumber)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"Mesa_{tableNumber}");
         }
 
-        public async Task LeaveTableGroup(int tableNumber)
+        public async Task LeaveMesaGroup(int tableNumber)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"Mesa_{tableNumber}");
         }
 
-        public async Task SendNewOrder(object order)
+        // ───── Grupo Cantadores ─────
+        public async Task JoinCantadorGroup()
         {
-            await Clients.Group("Cocina").SendAsync("NuevoPedido", order);
+            await Groups.AddToGroupAsync(Context.ConnectionId, "Cantadores");
         }
 
-        public async Task OrderReady(int orderId)
+        // ───── Desconexión ─────
+        public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            await Clients.All.SendAsync("PedidoListo", orderId);
-        }
-
-        public async Task UpdateOrderStatus(int orderId, string status)
-        {
-            await Clients.All.SendAsync("ActualizacionPedido", new { orderId, status });
-        }
-
-        public async Task NotifyTableStatusChanged(int tableNumber, bool isOccupied)
-        {
-            await Clients.Group("Mozos").SendAsync("MesaCambio", new { tableNumber, isOccupied });
-        }
-
-        // ✅ NUEVO: Notifica a todos los mozos que el menú cambió
-        public async Task NotifyMenuUpdated(string reason)
-        {
-            await Clients.Group("Mozos").SendAsync("MenuActualizado", new { reason });
-            Console.WriteLine($"MenuActualizado disparado: {reason}");
+            await base.OnDisconnectedAsync(exception);
         }
     }
 }

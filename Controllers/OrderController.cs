@@ -22,16 +22,26 @@ namespace AppRestaurantAPI.Controllers
             _hubContext = hubContext;
         }
 
-        // ════════════════════════════════════
+        // Helper: notifica a Cocina y Cantadores en una sola llamada
+        private async Task NotifyKitchen(Order? orderWithItems)
+        {
+            if (orderWithItems == null) return;
+            await _hubContext.Clients.Group("Cocina")
+                .SendAsync("ActualizacionPedido", orderWithItems);
+            await _hubContext.Clients.Group("Cantadores")
+                .SendAsync("ActualizacionPedido", orderWithItems);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════════
         // RUTAS ESPECÍFICAS (van primero)
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
 
         [HttpGet("table/{tableNumber}")]
         public async Task<ActionResult<IEnumerable<Order>>> GetOrdersByTable(int tableNumber)
         {
             return await _context.Orders
                 .Where(o => o.TableNumber == tableNumber)
-                .Include(o => o.Items)
+                .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .ToListAsync();
         }
@@ -42,7 +52,7 @@ namespace AppRestaurantAPI.Controllers
             try
             {
                 var order = _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefault(o => o.Id == id);
 
@@ -80,10 +90,10 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         // Modificar cantidad de un item
         // PUT: api/order/{orderId}/item/{itemId}
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         [HttpPut("{orderId}/item/{itemId}")]
         public async Task<IActionResult> UpdateItemQuantity(
     int orderId, int itemId, [FromBody] UpdateItemRequest request)
@@ -91,7 +101,7 @@ namespace AppRestaurantAPI.Controllers
             try
             {
                 var order = await _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
@@ -107,6 +117,10 @@ namespace AppRestaurantAPI.Controllers
 
                 var oldQuantity = item.Quantity;
                 var productName = item.Product?.Name ?? $"Producto #{item.ProductId}";
+
+                // ⚠ Si la nueva cantidad es menor a lo ya servido, ajustar ServedQuantity
+                if (request.Quantity < item.ServedQuantity)
+                    item.ServedQuantity = request.Quantity;
 
                 // Recalcular total
                 var diff = (request.Quantity - oldQuantity) * item.UnitPrice;
@@ -129,10 +143,9 @@ namespace AppRestaurantAPI.Controllers
                     if (h.Action == "Inicial" || h.Action == "Agregado")
                     {
                         normalRound++;
-                        // Ver si este producto estaba en esta ronda
                         try
                         {
-                            var items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
+                            var items = JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
                             bool found = items?.Any(i => (int)i.productId == item.ProductId) ?? false;
                             if (found) roundNumber = normalRound;
                         }
@@ -160,12 +173,11 @@ namespace AppRestaurantAPI.Controllers
                 await _context.SaveChangesAsync();
 
                 var orderWithItems = await _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
-                await _hubContext.Clients.Group("Cocina")
-                    .SendAsync("ActualizacionPedido", orderWithItems);
+                await NotifyKitchen(orderWithItems);
 
                 return Ok(orderWithItems);
             }
@@ -175,17 +187,17 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         // Eliminar un item de la orden
         // DELETE: api/order/{orderId}/item/{itemId}
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         [HttpDelete("{orderId}/item/{itemId}")]
         public async Task<IActionResult> RemoveItemFromOrder(int orderId, int itemId)
         {
             try
             {
                 var order = await _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
@@ -221,7 +233,7 @@ namespace AppRestaurantAPI.Controllers
                         normalRound++;
                         try
                         {
-                            var items = Newtonsoft.Json.JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
+                            var items = JsonConvert.DeserializeObject<List<dynamic>>(h.ItemsAdded);
                             bool found = items?.Any(i => (int)i.productId == item.ProductId) ?? false;
                             if (found) roundNumber = normalRound;
                         }
@@ -248,12 +260,11 @@ namespace AppRestaurantAPI.Controllers
                 await _context.SaveChangesAsync();
 
                 var orderWithItems = await _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
-                await _hubContext.Clients.Group("Cocina")
-                    .SendAsync("ActualizacionPedido", orderWithItems);
+                await NotifyKitchen(orderWithItems);
 
                 return Ok(orderWithItems);
             }
@@ -263,9 +274,9 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
         // RUTAS GENÉRICAS
-        // ════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════════════════
 
         [HttpPost]
         public async Task<ActionResult<Order>> CreateOrder(Order order)
@@ -304,14 +315,18 @@ namespace AppRestaurantAPI.Controllers
                         .Include(o => o.Items)
                         .FirstOrDefaultAsync(o => o.Id == lastOrderToday.Id);
 
-                    orderToUse = lastOrderToday;
+                    orderToUse = lastOrderToday!;
                     orderToUse.Total += order.Total;
+
+                    // ⚠ Si se agregan items nuevos a una orden ya cantada,
+                    //    la marcamos para que el cantador la vuelva a cantar.
+                    orderToUse.WasSung = false;
 
                     if (order.Items != null)
                     {
                         foreach (var item in order.Items)
                         {
-                            var existingItem = lastOrderToday.Items?
+                            var existingItem = lastOrderToday!.Items?
                                 .FirstOrDefault(i => i.ProductId == item.ProductId);
                             if (existingItem != null)
                             {
@@ -379,7 +394,7 @@ namespace AppRestaurantAPI.Controllers
                 }
 
                 var orderWithItems = await _context.Orders
-                    .Include(o => o.Items)
+                    .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderToUse.Id);
 
@@ -396,8 +411,7 @@ namespace AppRestaurantAPI.Controllers
                     Console.WriteLine($"✗ Error generando PDF: {ex.Message}");
                 }
 
-                await _hubContext.Clients.Group("Cocina")
-                    .SendAsync("ActualizacionPedido", orderWithItems);
+                await NotifyKitchen(orderWithItems);
 
                 await _hubContext.Clients.Group("Mozos")
                 .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });
@@ -417,7 +431,7 @@ namespace AppRestaurantAPI.Controllers
         public async Task<ActionResult<IEnumerable<Order>>> GetOrders()
         {
             var query = _context.Orders
-                .Include(o => o.Items)
+                .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .Include(o => o.History);
             return await query.ToListAsync();
@@ -427,7 +441,7 @@ namespace AppRestaurantAPI.Controllers
         public async Task<ActionResult<Order>> GetOrder(int id)
         {
             var order = await _context.Orders
-                .Include(o => o.Items)
+                .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .FirstOrDefaultAsync(o => o.Id == id);
 
@@ -449,12 +463,11 @@ namespace AppRestaurantAPI.Controllers
             await _context.SaveChangesAsync();
 
             var orderWithItems = await _context.Orders
-                .Include(o => o.Items)
+                .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
-            await _hubContext.Clients.Group("Cocina")
-                .SendAsync("ActualizacionPedido", orderWithItems);
+            await NotifyKitchen(orderWithItems);
 
             return CreatedAtAction(nameof(GetOrder), new { id = orderId }, item);
         }
@@ -473,19 +486,53 @@ namespace AppRestaurantAPI.Controllers
         [HttpPut("{id}/status")]
         public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] string status)
         {
-            var order = await _context.Orders.FindAsync(id);
+            var order = await _context.Orders
+                .Include(o => o.Items)
+                .FirstOrDefaultAsync(o => o.Id == id);
             if (order == null)
                 return NotFound();
 
             order.Status = status;
             order.UpdatedAt = DateTime.UtcNow;
+
+            // ✅ Si el chef desde la web marca "Listo", también ajustamos los ServedQuantity
+            //    para mantener consistencia con el cantador.
+            if (status == "Listo" && order.Items != null)
+            {
+                foreach (var item in order.Items)
+                {
+                    if (item.ServedQuantity < item.Quantity)
+                    {
+                        item.ServedQuantity = item.Quantity;
+                        _context.Update(item);
+                    }
+                }
+            }
+
+            _context.Entry(order).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+
+            // ✅ FIX: Notificar a Cocina (web del chef) y Cantadores que la orden cambió.
+            //    Antes solo notificábamos a Mozos y Cantadores con MesaCambio/OrderStatusChanged,
+            //    pero la web del chef NO recibía nada y solo se actualizaba al recargar manualmente.
+            //
+            //    Recargamos la orden con todos los includes para enviarla completa.
+            var orderWithItems = await _context.Orders
+                .Include(o => o.Items!)
+                .ThenInclude(oi => oi.Product)
+                .FirstOrDefaultAsync(o => o.Id == id);
+
+            await NotifyKitchen(orderWithItems);
+
+            // Mantener notificaciones específicas a Mozos y Cantadores cuando cambia a Listo/Cancelado
             if (status == "Listo" || status == "Cancelado")
             {
                 await _hubContext.Clients.Group("Mozos")
                     .SendAsync("MesaCambio", new { tableNumber = order.TableNumber, isOccupied = false });
+                await _hubContext.Clients.Group("Cantadores")
+                    .SendAsync("OrderStatusChanged", new { orderId = order.Id, status = status });
             }
-            _context.Entry(order).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+
             return NoContent();
         }
 
@@ -534,6 +581,8 @@ namespace AppRestaurantAPI.Controllers
             }
 
             order.Total += items.Sum(i => i.Quantity * i.UnitPrice);
+            // Si se agregan items, hay que volver a cantar
+            order.WasSung = false;
             _context.Update(order);
 
             var historyEntry = new OrderHistory
@@ -548,12 +597,11 @@ namespace AppRestaurantAPI.Controllers
             await _context.SaveChangesAsync();
 
             var orderWithItems = await _context.Orders
-                .Include(o => o.Items)
+                .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
-            await _hubContext.Clients.Group("Cocina")
-                .SendAsync("ActualizacionPedido", orderWithItems);
+            await NotifyKitchen(orderWithItems);
 
             return Ok(orderWithItems);
         }
