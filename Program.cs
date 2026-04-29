@@ -19,20 +19,6 @@ builder.Services.AddSignalR();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-//builder.Services.AddCors(options =>
-//{
-//    options.AddPolicy("AllowAll", builder =>
-//    {
-//        builder.WithOrigins(
-//                "http://localhost:4200",
-//                "https://chef-dashboard-seven.vercel.app"
-//               )
-//               .AllowAnyMethod()
-//               .AllowAnyHeader()
-//               .AllowCredentials();
-//    });
-//});
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", builder =>
@@ -49,11 +35,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+// ✅ Swagger SIEMPRE (también en producción) — útil para verificar endpoints
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseCors("AllowAll");
 app.UseAuthorization();
@@ -84,7 +68,6 @@ try
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-
         // Seed de categorías si no existen
         if (!db.Categories.Any())
         {
@@ -101,7 +84,6 @@ try
         // Seed de productos si no existen
         if (!db.Products.Any())
         {
-            // Obtener IDs de categorías
             var guisos = db.Categories.First(c => c.Name == "Guisos").Id;
             var fritos = db.Categories.First(c => c.Name == "Fritos").Id;
             var mariscos = db.Categories.First(c => c.Name == "Mariscos").Id;
