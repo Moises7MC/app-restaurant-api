@@ -51,4 +51,9 @@
         public bool OrderCompleted { get; set; }
         public int TableNumber { get; set; }
     }
+    public class ServirEntradaRequest
+    {
+        public string EntradaName { get; set; } = string.Empty;
+        public bool Servida { get; set; }
+    }
 }

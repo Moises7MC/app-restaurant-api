@@ -271,9 +271,13 @@ namespace AppRestaurantAPI.Controllers
                 targetOrder.UpdatedAt = DateTime.UtcNow;
                 _context.Update(targetItem);
 
-                // ¿La orden quedó completamente servida?
-                bool allServed = (targetOrder.Items ?? new List<OrderItem>())
+                // ✅ Después
+                bool allSegundosServed = (targetOrder.Items ?? new List<OrderItem>())
                     .All(i => i.ServedQuantity >= i.Quantity);
+
+                bool allEntradasServed = AreEntradasCompleted(targetOrder);
+
+                bool allServed = allSegundosServed && allEntradasServed;
 
                 if (allServed)
                 {
@@ -369,10 +373,15 @@ namespace AppRestaurantAPI.Controllers
                     .Where(i => i.OrderId == item.OrderId)
                     .ToListAsync();
 
-                bool allServed = allItems.All(i =>
+                // ✅ Después — también revisa entradas
+                bool allSegundosServed = allItems.All(i =>
                     i.Id == item.Id
                         ? (item.ServedQuantity >= item.Quantity)
                         : (i.ServedQuantity >= i.Quantity));
+
+                bool allEntradasServed = AreEntradasCompleted(item.Order);
+
+                bool allServed = allSegundosServed && allEntradasServed;
 
                 if (allServed)
                     item.Order.Status = "Listo";
@@ -453,6 +462,169 @@ namespace AppRestaurantAPI.Controllers
             {
                 return BadRequest($"Error: {ex.Message}");
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // POST: api/cantador/{orderId}/servir-entrada
+        // Marca o desmarca una entrada como servida.
+        // Body: { "entradaName": "ensalada rusa", "servida": true }
+        // ═══════════════════════════════════════════════════════════════════
+        [HttpPost("{orderId}/servir-entrada")]
+        public async Task<IActionResult> ServirEntrada(int orderId, [FromBody] ServirEntradaRequest request)
+        {
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.Items!)
+                        .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null) return NotFound("Orden no encontrada");
+
+                // Parsear las entradas servidas actuales
+                var servidasActuales = new List<string>();
+                if (!string.IsNullOrWhiteSpace(order.EntradasServidas))
+                {
+                    try
+                    {
+                        servidasActuales = Newtonsoft.Json.JsonConvert
+                            .DeserializeObject<List<string>>(order.EntradasServidas)
+                            ?? new List<string>();
+                    }
+                    catch { }
+                }
+
+                var entradaNorm = request.EntradaName.ToLower().Trim();
+
+                if (request.Servida)
+                {
+                    // ✅ Contar cuántas hay en total vs cuántas ya están servidas
+                    var totalDeEstaEntrada = ParseEntradas(order.Entradas ?? "")
+                        .Count(e => e.ToLower().Trim() == entradaNorm);
+
+                    var yaServidasDeEsta = servidasActuales
+                        .Count(e => e.ToLower().Trim() == entradaNorm);
+
+                    // Solo agregar UNA si aún hay pendientes
+                    if (yaServidasDeEsta < totalDeEstaEntrada)
+                        servidasActuales.Add(request.EntradaName.Trim());
+                }
+                else
+                {
+                    // ✅ Quitar solo UNA ocurrencia (no todas)
+                    var idx = servidasActuales.FindIndex(e => e.ToLower().Trim() == entradaNorm);
+                    if (idx >= 0) servidasActuales.RemoveAt(idx);
+                }
+
+                order.EntradasServidas = Newtonsoft.Json.JsonConvert.SerializeObject(servidasActuales);
+                order.UpdatedAt = DateTime.UtcNow;
+                _context.Update(order);
+                await _context.SaveChangesAsync();
+
+                // Recargar con items para el evento SignalR
+                var orderWithItems = await _context.Orders
+                    .Include(o => o.Items!)
+                        .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                // ✅ Verificar si la orden quedó completamente servida
+                var allItems = await _context.OrderItems
+                    .Where(i => i.OrderId == order.Id)
+                    .ToListAsync();
+
+                bool allSegundosServed = allItems.All(i => i.ServedQuantity >= i.Quantity);
+                bool allEntradasServed = AreEntradasCompleted(order);
+                bool allServed = allSegundosServed && allEntradasServed;
+
+                Console.WriteLine($"🔍 ServirEntrada - orderId:{order.Id} - allSegundosServed:{allSegundosServed} - allEntradasServed:{allEntradasServed} - allServed:{allServed} - status:{order.Status}");
+
+                if (allServed && order.Status != "Listo")
+                {
+                    order.Status = "Listo";
+                    order.UpdatedAt = DateTime.UtcNow;
+                    _context.Update(order);
+                    await _context.SaveChangesAsync();
+
+                    await _hubContext.Clients.Group("Mozos")
+                        .SendAsync("MesaCambio", new
+                        {
+                            tableNumber = order.TableNumber,
+                            isOccupied = false
+                        });
+                    await _hubContext.Clients.Group($"Mesa_{order.TableNumber}")
+                        .SendAsync("PedidoListo", orderWithItems);
+                }
+
+                // Notificar a la web del admin en tiempo real
+                await _hubContext.Clients.Group("Cocina")
+                    .SendAsync("EntradaServida", new
+                    {
+                        orderId = order.Id,
+                        tableNumber = order.TableNumber,
+                        entradaName = request.EntradaName,
+                        servida = request.Servida,
+                        entradasServidas = servidasActuales,
+                        orderCompleted = allServed
+                    });
+
+                // Notificar a cantadores para que refresquen
+                await _hubContext.Clients.Group("Cantadores")
+                    .SendAsync("ItemServed", new
+                    {
+                        orderId = order.Id,
+                        tableNumber = order.TableNumber,
+                        orderCompleted = allServed
+                    });
+
+                return Ok(new
+                {
+                    orderId = order.Id,
+                    entradasServidas = servidasActuales,
+                    orderCompleted = allServed
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error en ServirEntrada: {ex.Message}");
+                return BadRequest($"Error: {ex.Message}");
+            }
+        }
+
+        private static bool AreEntradasCompleted(Order order)
+        {
+            // Si no tiene entradas, no hay nada que verificar
+            if (string.IsNullOrWhiteSpace(order.Entradas)) return true;
+
+            var totalEntradas = ParseEntradas(order.Entradas);
+            if (totalEntradas.Count == 0) return true;
+
+            // Parsear las entradas ya servidas
+            var servidasActuales = new List<string>();
+            if (!string.IsNullOrWhiteSpace(order.EntradasServidas))
+            {
+                try
+                {
+                    servidasActuales = Newtonsoft.Json.JsonConvert
+                        .DeserializeObject<List<string>>(order.EntradasServidas)
+                        ?? new List<string>();
+                }
+                catch (Exception ex)
+                {
+                }
+                catch { }
+            }
+
+            // Verificar que cada entrada tenga su correspondiente servida
+            var servidasCopy = new List<string>(servidasActuales);
+            foreach (var entrada in totalEntradas)
+            {
+                var idx = servidasCopy.FindIndex(e =>
+                    e.ToLower().Trim() == entrada.ToLower().Trim());
+                if (idx < 0) return false; // Esta entrada aún no fue servida
+                servidasCopy.RemoveAt(idx);
+            }
+
+            return true;
         }
     }
 }

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["src/environments/environment.local.ts"],
+  "sourcesContent": ["// ✅ Configuración para RED LOCAL (WiFi del restaurante/casa)\r\nexport const environment = {\r\n  production: false,\r\n  apiUrl: 'http://192.168.1.9:5245/api',\r\n  apiBaseUrl: 'http://192.168.1.9:5245'\r\n};"],
+  "mappings": ";AACO,IAAM,cAAc;EACzB,YAAY;EACZ,QAAQ;EACR,YAAY;;",
+  "names": []
+}

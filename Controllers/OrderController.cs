@@ -549,7 +549,7 @@ namespace AppRestaurantAPI.Controllers
         }
 
         [HttpPost("{orderId}/items-batch")]
-        public async Task<ActionResult> AddItemsBatchToOrder(int orderId, List<OrderItem> items)
+        public async Task<ActionResult> AddItemsBatchToOrder(int orderId, [FromBody] AddItemsBatchRequest request)
         {
             var order = await _context.Orders
                 .Include(o => o.Items)
@@ -558,41 +558,55 @@ namespace AppRestaurantAPI.Controllers
             if (order == null)
                 return NotFound("Orden no encontrada");
 
-            var snapshot = items.Select(i => new
+            // 1. Manejo de los ítems (segundos)
+            if (request.Items != null && request.Items.Count > 0)
             {
-                productId = i.ProductId,
-                quantity = i.Quantity,
-                unitPrice = i.UnitPrice
-            }).ToList();
+                var snapshot = request.Items.Select(i => new
+                {
+                    productId = i.ProductId,
+                    quantity = i.Quantity,
+                    unitPrice = i.UnitPrice
+                }).ToList();
 
-            foreach (var item in items)
-            {
-                var existing = order.Items?.FirstOrDefault(i => i.ProductId == item.ProductId);
-                if (existing != null)
+                foreach (var item in request.Items)
                 {
-                    existing.Quantity += item.Quantity;
-                    _context.Update(existing);
+                    var existing = order.Items?.FirstOrDefault(i => i.ProductId == item.ProductId);
+                    if (existing != null)
+                    {
+                        existing.Quantity += item.Quantity;
+                        _context.Update(existing);
+                    }
+                    else
+                    {
+                        item.OrderId = orderId;
+                        _context.OrderItems.Add(item);
+                    }
                 }
-                else
+
+                order.Total += request.Items.Sum(i => i.Quantity * i.UnitPrice);
+
+                var historyEntry = new OrderHistory
                 {
-                    item.OrderId = orderId;
-                    _context.OrderItems.Add(item);
-                }
+                    OrderId = orderId,
+                    Action = "Agregado",
+                    ItemsAdded = JsonConvert.SerializeObject(snapshot),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.OrderHistories.Add(historyEntry);
             }
 
-            order.Total += items.Sum(i => i.Quantity * i.UnitPrice);
-            // Si se agregan items, hay que volver a cantar
-            order.WasSung = false;
-            _context.Update(order);
-
-            var historyEntry = new OrderHistory
+            // 🛑 2. NUEVA LÓGICA: ACTUALIZACIÓN DE ENTRADAS 🛑
+            if (!string.IsNullOrEmpty(request.Entradas))
             {
-                OrderId = orderId,
-                Action = "Agregado",
-                ItemsAdded = JsonConvert.SerializeObject(snapshot),
-                CreatedAt = DateTime.UtcNow
-            };
-            _context.OrderHistories.Add(historyEntry);
+                order.Entradas = request.Entradas;
+            }
+
+            // Si se agregan items o se actualizan entradas, hay que volver a cantar
+            if ((request.Items != null && request.Items.Count > 0) || !string.IsNullOrEmpty(request.Entradas))
+            {
+                order.WasSung = false;
+                _context.Update(order);
+            }
 
             await _context.SaveChangesAsync();
 
@@ -611,5 +625,12 @@ namespace AppRestaurantAPI.Controllers
     public class UpdateItemRequest
     {
         public int Quantity { get; set; }
+    }
+
+    // 🛑 NUEVO DTO PARA RECIBIR ITEMS Y ENTRADAS JUNTOS 🛑
+    public class AddItemsBatchRequest
+    {
+        public List<OrderItem> Items { get; set; } = new List<OrderItem>();
+        public string? Entradas { get; set; } // Opcional, puede venir nulo
     }
 }

@@ -21,23 +21,38 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", builder =>
+    options.AddPolicy("AllowAll", policy =>
     {
-        builder.WithOrigins(
-                "http://localhost:4200",
-                "https://chef-dashboard-seven.vercel.app"
-               )
-               .AllowAnyMethod()
-               .AllowAnyHeader()
-               .AllowCredentials();
+        policy.SetIsOriginAllowed(_ => true)
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
 
 var app = builder.Build();
 
-// ✅ Swagger SIEMPRE (también en producción) — útil para verificar endpoints
 app.UseSwagger();
 app.UseSwaggerUI();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+// ✅ Fallback para Angular Router (soluciona el F5/recarga)
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == 404
+        && !context.Request.Path.StartsWithSegments("/api")
+        && !context.Request.Path.StartsWithSegments("/hubs")
+        && !context.Request.Path.StartsWithSegments("/swagger"))
+    {
+        context.Response.StatusCode = 200;
+        await context.Response.SendFileAsync(
+            Path.Combine(app.Environment.ContentRootPath, "wwwroot", "index.html")
+        );
+    }
+});
 
 app.UseCors("AllowAll");
 app.UseAuthorization();
@@ -68,7 +83,6 @@ try
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Seed de categorías si no existen
         if (!db.Categories.Any())
         {
             db.Categories.AddRange(
@@ -81,7 +95,6 @@ try
             Console.WriteLine("✓ Categorías seeded correctamente");
         }
 
-        // Seed de productos si no existen
         if (!db.Products.Any())
         {
             var guisos = db.Categories.First(c => c.Name == "Guisos").Id;
@@ -104,5 +117,7 @@ catch (Exception ex)
 {
     Console.WriteLine($"✗ Error al seedear datos: {ex.Message}");
 }
+
+app.Urls.Add("http://0.0.0.0:5245");
 
 app.Run();
