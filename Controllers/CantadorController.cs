@@ -5,6 +5,7 @@ using AppRestaurantAPI.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
 
 namespace AppRestaurantAPI.Controllers
 {
@@ -76,8 +77,6 @@ namespace AppRestaurantAPI.Controllers
                     .ToList();
 
                 // ─── ENTRADAS (cortesías del campo Order.Entradas) ───
-                // Order.Entradas es un string. Asumimos formato "humita,humita,ensalada rusa" o similar.
-                // Hacemos parse robusto.
                 var entradas = activeOrders
                     .Where(o => !string.IsNullOrWhiteSpace(o.Entradas))
                     .SelectMany(o => ParseEntradas(o.Entradas!)
@@ -119,8 +118,6 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // Helper: parsea el string Entradas. Soporta "humita,ensalada rusa" o "humita;ensalada rusa"
-        // o también JSON tipo ["humita","ensalada rusa"]. Si llega "humita x2" reconoce el "x2".
         // Helper: parsea el string Entradas. Soporta múltiples formatos:
         //   - "humita,ensalada rusa"          → 1 humita + 1 ensalada rusa
         //   - "1x humita,2x ensalada rusa"    → 1 humita + 2 ensaladas rusas (formato del frontend actual)
@@ -140,17 +137,19 @@ namespace AppRestaurantAPI.Controllers
             {
                 try
                 {
-                    rawItems = Newtonsoft.Json.JsonConvert.DeserializeObject<List<string>>(trimmed)
-                               ?? new List<string>();
+                    rawItems = JsonConvert.DeserializeObject<List<string>>(trimmed) ?? new List<string>();
                 }
                 catch
                 {
-                    rawItems = trimmed.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                    rawItems = System.Text.RegularExpressions.Regex.Split(trimmed, @"[,;\r\n]+").ToList();
                 }
             }
             else
             {
-                rawItems = trimmed.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+                // ✅ Separar por comas, punto y coma, saltos de línea (Windows \r\n o Unix \n)
+                rawItems = System.Text.RegularExpressions.Regex.Split(trimmed, @"[,;\r\n]+").ToList();
+                // Eliminar posibles strings vacíos
+                rawItems = rawItems.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
             }
 
             foreach (var raw in rawItems)
@@ -160,10 +159,8 @@ namespace AppRestaurantAPI.Controllers
 
                 int multiplier = 1;
 
-                // ✅ Formato "2x ensalada rusa" o "2 x ensalada rusa" (multiplicador AL INICIO)
-                var prefixMatch = System.Text.RegularExpressions.Regex.Match(item, @"^\s*(\d+)\s*x\s+(.+)$",
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
+                // Formato "2x ensalada rusa" o "2 x ensalada rusa"
+                var prefixMatch = System.Text.RegularExpressions.Regex.Match(item, @"^\s*(\d+)\s*x\s+(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 if (prefixMatch.Success)
                 {
                     multiplier = int.Parse(prefixMatch.Groups[1].Value);
@@ -171,13 +168,12 @@ namespace AppRestaurantAPI.Controllers
                 }
                 else
                 {
-                    // ✅ Formato "ensalada rusa x2" (multiplicador AL FINAL) — compatibilidad
-                    var suffixMatch = System.Text.RegularExpressions.Regex.Match(item, @"\s*x\s*(\d+)\s*$",
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    // Formato "ensalada rusa x2"
+                    var suffixMatch = System.Text.RegularExpressions.Regex.Match(item, @"(.+)\s*x\s*(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (suffixMatch.Success)
                     {
-                        multiplier = int.Parse(suffixMatch.Groups[1].Value);
-                        item = item.Substring(0, suffixMatch.Index).Trim();
+                        multiplier = int.Parse(suffixMatch.Groups[2].Value);
+                        item = suffixMatch.Groups[1].Value.Trim();
                     }
                 }
 
@@ -189,7 +185,6 @@ namespace AppRestaurantAPI.Controllers
 
             return result;
         }
-
         // ═══════════════════════════════════════════════════════════════════
         // GET: api/cantador/orders
         // Devuelve las órdenes del día activas, para el tab "POR MESA".
@@ -271,7 +266,7 @@ namespace AppRestaurantAPI.Controllers
                 targetOrder.UpdatedAt = DateTime.UtcNow;
                 _context.Update(targetItem);
 
-                // ✅ Después
+                // ✅ Verificar si todo está servido (segundos + entradas)
                 bool allSegundosServed = (targetOrder.Items ?? new List<OrderItem>())
                     .All(i => i.ServedQuantity >= i.Quantity);
 
@@ -373,7 +368,7 @@ namespace AppRestaurantAPI.Controllers
                     .Where(i => i.OrderId == item.OrderId)
                     .ToListAsync();
 
-                // ✅ Después — también revisa entradas
+                // ✅ Verificar si todo está servido (segundos + entradas)
                 bool allSegundosServed = allItems.All(i =>
                     i.Id == item.Id
                         ? (item.ServedQuantity >= item.Quantity)
@@ -487,47 +482,54 @@ namespace AppRestaurantAPI.Controllers
                 {
                     try
                     {
-                        servidasActuales = Newtonsoft.Json.JsonConvert
-                            .DeserializeObject<List<string>>(order.EntradasServidas)
+                        servidasActuales = JsonConvert.DeserializeObject<List<string>>(order.EntradasServidas)
                             ?? new List<string>();
                     }
                     catch { }
                 }
 
+                // Normalizar nombre de la entrada (minúsculas y trim)
                 var entradaNorm = request.EntradaName.ToLower().Trim();
 
                 if (request.Servida)
                 {
-                    // ✅ Contar cuántas hay en total vs cuántas ya están servidas
+                    // Contar cuántas unidades totales de esta entrada hay en la orden
                     var totalDeEstaEntrada = ParseEntradas(order.Entradas ?? "")
                         .Count(e => e.ToLower().Trim() == entradaNorm);
 
                     var yaServidasDeEsta = servidasActuales
                         .Count(e => e.ToLower().Trim() == entradaNorm);
 
-                    // Solo agregar UNA si aún hay pendientes
+                    // Agregar UNA unidad si aún hay pendientes
                     if (yaServidasDeEsta < totalDeEstaEntrada)
-                        servidasActuales.Add(request.EntradaName.Trim());
+                    {
+                        servidasActuales.Add(entradaNorm);  // Guardamos el nombre normalizado
+                        System.Diagnostics.Debug.WriteLine($"➕ Agregada entrada: {entradaNorm}. Total ahora: {string.Join(", ", servidasActuales)}");
+                    }
                 }
                 else
                 {
-                    // ✅ Quitar solo UNA ocurrencia (no todas)
+                    // Quitar UNA ocurrencia (la primera encontrada)
                     var idx = servidasActuales.FindIndex(e => e.ToLower().Trim() == entradaNorm);
-                    if (idx >= 0) servidasActuales.RemoveAt(idx);
+                    if (idx >= 0)
+                    {
+                        servidasActuales.RemoveAt(idx);
+                        System.Diagnostics.Debug.WriteLine($"➖ Removida entrada: {entradaNorm}. Total ahora: {string.Join(", ", servidasActuales)}");
+                    }
                 }
 
-                order.EntradasServidas = Newtonsoft.Json.JsonConvert.SerializeObject(servidasActuales);
+                order.EntradasServidas = JsonConvert.SerializeObject(servidasActuales);
                 order.UpdatedAt = DateTime.UtcNow;
                 _context.Update(order);
                 await _context.SaveChangesAsync();
 
-                // Recargar con items para el evento SignalR
+                // Recargar orden con items para SignalR
                 var orderWithItems = await _context.Orders
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
-                // ✅ Verificar si la orden quedó completamente servida
+                // Verificar si todos los segundos Y todas las entradas están servidas
                 var allItems = await _context.OrderItems
                     .Where(i => i.OrderId == order.Id)
                     .ToListAsync();
@@ -536,7 +538,15 @@ namespace AppRestaurantAPI.Controllers
                 bool allEntradasServed = AreEntradasCompleted(order);
                 bool allServed = allSegundosServed && allEntradasServed;
 
-                Console.WriteLine($"🔍 ServirEntrada - orderId:{order.Id} - allSegundosServed:{allSegundosServed} - allEntradasServed:{allEntradasServed} - allServed:{allServed} - status:{order.Status}");
+                // Logs de depuración con Debug.WriteLine
+                System.Diagnostics.Debug.WriteLine($"📊 ServirEntrada - OrderId:{order.Id}");
+                System.Diagnostics.Debug.WriteLine($"   Entradas totales (raw): {order.Entradas}");
+                System.Diagnostics.Debug.WriteLine($"   Entradas esperadas (expandidas): {string.Join(", ", ParseEntradas(order.Entradas ?? ""))}");
+                System.Diagnostics.Debug.WriteLine($"   Entradas servidas (guardadas): {string.Join(", ", servidasActuales)}");
+                System.Diagnostics.Debug.WriteLine($"   allSegundosServed: {allSegundosServed}");
+                System.Diagnostics.Debug.WriteLine($"   allEntradasServed: {allEntradasServed}");
+                System.Diagnostics.Debug.WriteLine($"   allServed: {allServed}");
+                System.Diagnostics.Debug.WriteLine($"   Status actual: {order.Status}");
 
                 if (allServed && order.Status != "Listo")
                 {
@@ -544,6 +554,8 @@ namespace AppRestaurantAPI.Controllers
                     order.UpdatedAt = DateTime.UtcNow;
                     _context.Update(order);
                     await _context.SaveChangesAsync();
+
+                    System.Diagnostics.Debug.WriteLine($"✅ Orden {order.Id} pasó a LISTO");
 
                     await _hubContext.Clients.Group("Mozos")
                         .SendAsync("MesaCambio", new
@@ -555,7 +567,7 @@ namespace AppRestaurantAPI.Controllers
                         .SendAsync("PedidoListo", orderWithItems);
                 }
 
-                // Notificar a la web del admin en tiempo real
+                // Notificaciones SignalR
                 await _hubContext.Clients.Group("Cocina")
                     .SendAsync("EntradaServida", new
                     {
@@ -567,7 +579,6 @@ namespace AppRestaurantAPI.Controllers
                         orderCompleted = allServed
                     });
 
-                // Notificar a cantadores para que refresquen
                 await _hubContext.Clients.Group("Cantadores")
                     .SendAsync("ItemServed", new
                     {
@@ -585,11 +596,14 @@ namespace AppRestaurantAPI.Controllers
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error en ServirEntrada: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"❌ Error en ServirEntrada: {ex.Message}");
                 return BadRequest($"Error: {ex.Message}");
             }
         }
-
+        // ═══════════════════════════════════════════════════════════════════
+        // ✅ MÉTODO HELPER CORREGIDO
+        // Verifica si TODAS las entradas de una orden están servidas
+        // ═══════════════════════════════════════════════════════════════════
         private static bool AreEntradasCompleted(Order order)
         {
             // Si no tiene entradas, no hay nada que verificar
@@ -604,24 +618,27 @@ namespace AppRestaurantAPI.Controllers
             {
                 try
                 {
-                    servidasActuales = Newtonsoft.Json.JsonConvert
-                        .DeserializeObject<List<string>>(order.EntradasServidas)
+                    servidasActuales = JsonConvert.DeserializeObject<List<string>>(order.EntradasServidas)
                         ?? new List<string>();
-                }
-                catch (Exception ex)
-                {
                 }
                 catch { }
             }
 
-            // Verificar que cada entrada tenga su correspondiente servida
-            var servidasCopy = new List<string>(servidasActuales);
-            foreach (var entrada in totalEntradas)
+            // ✅ FIX: Normalizar AMBAS listas a minúsculas y trim ANTES de comparar
+            var totalNorm = totalEntradas.Select(e => e.ToLower().Trim()).ToList();
+            var servidasNorm = servidasActuales.Select(s => s.ToLower().Trim()).ToList();
+
+            // Verificar que cada entrada total tenga su correspondiente servida
+            foreach (var entrada in totalNorm)
             {
-                var idx = servidasCopy.FindIndex(e =>
-                    e.ToLower().Trim() == entrada.ToLower().Trim());
-                if (idx < 0) return false; // Esta entrada aún no fue servida
-                servidasCopy.RemoveAt(idx);
+                int idx = servidasNorm.IndexOf(entrada);
+                if (idx < 0)
+                {
+                    // 🔍 Log para debugging
+                    Console.WriteLine($"⚠️ Entrada '{entrada}' aún no está servida");
+                    return false; // Esta entrada aún no fue servida
+                }
+                servidasNorm.RemoveAt(idx);
             }
 
             return true;
