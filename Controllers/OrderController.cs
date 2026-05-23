@@ -70,7 +70,7 @@ namespace AppRestaurantAPI.Controllers
         }
 
         [HttpGet("{id}/history")]
-        public async Task<ActionResult<IEnumerable<OrderHistory>>> GetOrderHistory(int id)
+        public async Task<ActionResult<IEnumerable<object>>> GetOrderHistory(int id)
         {
             try
             {
@@ -82,7 +82,42 @@ namespace AppRestaurantAPI.Controllers
                 if (history == null || history.Count == 0)
                     return NotFound("No hay histórico para esta orden");
 
-                return Ok(history);
+                var products = await _context.Products.ToListAsync();
+
+                var result = history.Select(h => new
+                {
+                    h.Id,
+                    h.OrderId,
+                    h.Action,
+                    h.RoundNumber,
+                    h.CreatedAt,
+
+                    Items = string.IsNullOrEmpty(h.ItemsAdded)
+                    ? new List<OrderHistoryItemResultDto>()
+                    : (System.Text.Json.JsonSerializer
+                        .Deserialize<List<HistorialItemDto>>(
+                            h.ItemsAdded,
+                            new System.Text.Json.JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            })
+                        ?? new List<HistorialItemDto>())
+                        .Select(i => new OrderHistoryItemResultDto
+                        {
+                            ProductId = i.ProductId,
+
+                            ProductName = products
+                                .FirstOrDefault(p => p.Id == i.ProductId)?.Name
+                                ?? "Producto",
+
+                            Quantity = i.Quantity,
+
+                            UnitPrice = i.UnitPrice
+                        })
+                        .ToList()
+                });
+
+                return Ok(result);
             }
             catch (Exception ex)
             {
@@ -90,13 +125,22 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
+        // DTO para representar los ítems en la respuesta de histórico (tipo concreto para evitar CS0173)
+        public class OrderHistoryItemResultDto
+    {
+        public int ProductId { get; set; }
+        public string ProductName { get; set; } = string.Empty;
+        public int Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+    }
+
         // ═══════════════════════════════════════════════════════════════════════════════
         // Modificar cantidad de un item
         // PUT: api/order/{orderId}/item/{itemId}
         // ═══════════════════════════════════════════════════════════════════════════════
         [HttpPut("{orderId}/item/{itemId}")]
         public async Task<IActionResult> UpdateItemQuantity(
-    int orderId, int itemId, [FromBody] UpdateItemRequest request)
+        int orderId, int itemId, [FromBody] UpdateItemRequest request)
         {
             try
             {
@@ -283,23 +327,42 @@ namespace AppRestaurantAPI.Controllers
         {
             try
             {
-                var today = DateTime.UtcNow.Date;
+                // 1. Obtenemos primero la zona horaria y la hora exacta de Perú (ej. 00:27)
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
 
-                // ✅ Buscamos la última orden de la misma mesa+tipo (normal o para llevar)
-                //    Que esté pendiente o enviada a cocina (no listo, no cobrado, no cancelado).
-                var lastOrderToday = await _context.Orders
+                // 2. Le asignamos ESA hora exacta directamente a la orden
+                order.CreatedAt = nowInPeru;
+                order.UpdatedAt = nowInPeru;
+
+                Console.WriteLine("===== ORDER RECIBIDA =====");
+                Console.WriteLine(JsonConvert.SerializeObject(order, Formatting.Indented));
+
+                // 3. Calculamos los límites del día usando nowInPeru para agrupar las comandas
+                var todayInPeru = nowInPeru.Date;
+                var startOfDayPeruUtc = TimeZoneInfo.ConvertTimeToUtc(todayInPeru, peruTimeZone);
+                var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
+
+                // Buscamos la última orden de la misma mesa...
+                var lastOrderToday = order.WaiterName == "Caja" ? null : await _context.Orders
                     .Where(o => o.TableNumber == order.TableNumber &&
-                                o.CreatedAt.Date == today &&
-                                o.IsParaLlevar == order.IsParaLlevar &&  // ← mismo tipo
+                                o.CreatedAt >= startOfDayPeruUtc &&
+                                o.CreatedAt < endOfDayPeruUtc &&
+                                o.IsParaLlevar == order.IsParaLlevar &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .OrderByDescending(o => o.Id)
                     .FirstOrDefaultAsync();
 
+                // ... EL RESTO DE TU CÓDIGO SE MANTIENE EXACTAMENTE IGUAL ...
+
+                var cashierOrders = await _context.Orders
+                    .Where(o => o.WaiterName == "Caja")
+                    .ToListAsync();
+
                 Order orderToUse;
                 bool isNewOrder = false;
 
-                // ✅ Si existe orden previa del mismo tipo, acumular en ella.
-                //    Aplica tanto a mesas normales como a "Para llevar".
+                // Si existe orden previa del mismo tipo, acumular en ella.
                 if (lastOrderToday != null)
                 {
                     var itemsSnapshot = order.Items?.Select(i => new
@@ -317,10 +380,8 @@ namespace AppRestaurantAPI.Controllers
 
                     orderToUse = lastOrderToday!;
                     orderToUse.Total += order.Total;
-
-                    // ⚠ Si se agregan items nuevos a una orden ya cantada,
-                    //    la marcamos para que el cantador la vuelva a cantar.
                     orderToUse.WasSung = false;
+                    orderToUse.UpdatedAt = DateTime.UtcNow;
 
                     if (order.Items != null)
                     {
@@ -354,13 +415,12 @@ namespace AppRestaurantAPI.Controllers
                 }
                 else
                 {
-                    // No hay orden previa del mismo tipo → crear orden nueva
+                    // No hay orden previa → crear orden nueva con comanda correlativa
                     order.Comanda = 'A';
                     isNewOrder = true;
 
-                    // Buscar el último Comanda de hoy de cualquier tipo, para asignar el siguiente
                     var anyLastToday = await _context.Orders
-                        .Where(o => o.CreatedAt.Date == today)
+                        .Where(o => o.CreatedAt >= startOfDayPeruUtc && o.CreatedAt < endOfDayPeruUtc)
                         .OrderByDescending(o => o.Id)
                         .FirstOrDefaultAsync();
 
@@ -414,7 +474,7 @@ namespace AppRestaurantAPI.Controllers
                 await NotifyKitchen(orderWithItems);
 
                 await _hubContext.Clients.Group("Mozos")
-                .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });
+                    .SendAsync("MesaCambio", new { tableNumber = orderWithItems.TableNumber, isOccupied = true });
 
                 return CreatedAtAction(nameof(GetOrder), new { id = orderWithItems.Id }, orderWithItems);
             }
@@ -489,10 +549,19 @@ namespace AppRestaurantAPI.Controllers
             var order = await _context.Orders
                 .Include(o => o.Items)
                 .FirstOrDefaultAsync(o => o.Id == id);
+
             if (order == null)
                 return NotFound();
 
-            order.Status = status;
+            if (order.TableNumber == 0 && order.WaiterName == "Caja")
+            {
+                order.Status = "Cobrado";
+            }
+            else
+            {
+                order.Status = status;
+            }
+
             order.UpdatedAt = DateTime.UtcNow;
 
             // ✅ Si el chef desde la web marca "Listo", también ajustamos los ServedQuantity

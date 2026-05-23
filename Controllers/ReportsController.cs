@@ -22,31 +22,21 @@ namespace AppRestaurantAPI.Controllers
         // ═══════════════════════════════════════════════════════════════════
         // Helper: parsear fechas y construir filtro base
         // ═══════════════════════════════════════════════════════════════════
-        private (DateTime fromUtc, DateTime toUtc) ParseDateRange(
-            string? fromStr, string? toStr)
+        private (DateTime from, DateTime to) ParseDateRange(string? fromStr, string? toStr)
         {
-            // Por defecto: hoy en hora de Lima
-            var limaTz = TimeZoneInfo.FindSystemTimeZoneById(
-                OperatingSystem.IsWindows() ? "SA Pacific Standard Time" : "America/Lima");
-            var nowLima = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, limaTz);
-
-            DateTime fromLima, toLima;
+            DateTime from, to;
 
             if (!string.IsNullOrEmpty(fromStr) && DateTime.TryParse(fromStr, out var f))
-                fromLima = f.Date;
+                from = f.Date;
             else
-                fromLima = nowLima.Date;
+                from = DateTime.Today;
 
             if (!string.IsNullOrEmpty(toStr) && DateTime.TryParse(toStr, out var t))
-                toLima = t.Date.AddDays(1).AddTicks(-1); // hasta el final del día
+                to = t.Date.AddDays(1).AddTicks(-1); // hasta el final del día
             else
-                toLima = fromLima.AddDays(1).AddTicks(-1);
+                to = from.AddDays(1).AddTicks(-1);
 
-            // Convertir a UTC para consultar la BD
-            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromLima, limaTz);
-            var toUtc = TimeZoneInfo.ConvertTimeToUtc(toLima, limaTz);
-
-            return (fromUtc, toUtc);
+            return (from, to);
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -56,14 +46,14 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary(string? from, string? to)
         {
-            var (fromUtc, toUtc) = ParseDateRange(from, to);
+            var (fromDate, toDate) = ParseDateRange(from, to);
 
             var orders = await _context.Orders
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .Where(o => o.Status == "Cobrado" &&
-                            o.CreatedAt >= fromUtc &&
-                            o.CreatedAt <= toUtc)
+                            o.CreatedAt >= fromDate &&
+                            o.CreatedAt <= toDate)
                 .ToListAsync();
 
             var totalOrders = orders.Count;
@@ -88,8 +78,8 @@ namespace AppRestaurantAPI.Controllers
                 ticketPromedio = Math.Round(promedio, 2),
                 platoEstrella = topPlato?.name ?? "—",
                 platoEstrellaCantidad = topPlato?.qty ?? 0,
-                fromDate = fromUtc,
-                toDate = toUtc
+                fromDate,
+                toDate
             });
         }
 
@@ -100,15 +90,15 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("by-category")]
         public async Task<IActionResult> GetByCategory(string? from, string? to)
         {
-            var (fromUtc, toUtc) = ParseDateRange(from, to);
+            var (fromDate, toDate) = ParseDateRange(from, to);
 
             var orders = await _context.Orders
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .ThenInclude(p => p!.Category)
                 .Where(o => o.Status == "Cobrado" &&
-                            o.CreatedAt >= fromUtc &&
-                            o.CreatedAt <= toUtc)
+                            o.CreatedAt >= fromDate &&
+                            o.CreatedAt <= toDate)
                 .ToListAsync();
 
             var allItems = orders
@@ -149,15 +139,15 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("by-product")]
         public async Task<IActionResult> GetByProduct(string? from, string? to)
         {
-            var (fromUtc, toUtc) = ParseDateRange(from, to);
+            var (fromDate, toDate) = ParseDateRange(from, to);
 
             var orders = await _context.Orders
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .ThenInclude(p => p!.Category)
                 .Where(o => o.Status == "Cobrado" &&
-                            o.CreatedAt >= fromUtc &&
-                            o.CreatedAt <= toUtc)
+                            o.CreatedAt >= fromDate &&
+                            o.CreatedAt <= toDate)
                 .ToListAsync();
 
             var allItems = orders
@@ -197,13 +187,13 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("by-waiter")]
         public async Task<IActionResult> GetByWaiter(string? from, string? to)
         {
-            var (fromUtc, toUtc) = ParseDateRange(from, to);
+            var (fromDate, toDate) = ParseDateRange(from, to);
 
             var orders = await _context.Orders
                 .Include(o => o.Items)
                 .Where(o => o.Status == "Cobrado" &&
-                            o.CreatedAt >= fromUtc &&
-                            o.CreatedAt <= toUtc)
+                            o.CreatedAt >= fromDate &&
+                            o.CreatedAt <= toDate)
                 .ToListAsync();
 
             var grouped = orders
@@ -229,22 +219,20 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("by-hour")]
         public async Task<IActionResult> GetByHour(string? from, string? to)
         {
-            var (fromUtc, toUtc) = ParseDateRange(from, to);
-
-            var limaTz = TimeZoneInfo.FindSystemTimeZoneById(
-                OperatingSystem.IsWindows() ? "SA Pacific Standard Time" : "America/Lima");
+            var (fromDate, toDate) = ParseDateRange(from, to);
 
             var orders = await _context.Orders
                 .Include(o => o.Items)
                 .Where(o => o.Status == "Cobrado" &&
-                            o.CreatedAt >= fromUtc &&
-                            o.CreatedAt <= toUtc)
+                            o.CreatedAt >= fromDate &&
+                            o.CreatedAt <= toDate)
                 .ToListAsync();
 
             var grouped = orders
                 .Select(o => new
                 {
-                    hour = TimeZoneInfo.ConvertTimeFromUtc(o.CreatedAt, limaTz).Hour,
+                    // Usar la hora directamente sin conversión de zona horaria
+                    hour = o.CreatedAt.Hour,
                     o.Total,
                     platos = (o.Items ?? new List<Models.OrderItem>()).Sum(i => i.Quantity)
                 })

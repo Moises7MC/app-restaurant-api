@@ -2,8 +2,12 @@ using AppRestaurantAPI.Data;
 using AppRestaurantAPI.Hubs;
 using AppRestaurantAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql; // ← AGREGAR ESTO
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ✅ AGREGAR ESTA LÍNEA ANTES DE TODO - Soluciona el problema de timestamps
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -34,7 +38,6 @@ var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI();
-
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
@@ -82,7 +85,6 @@ try
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
         if (!db.Categories.Any())
         {
             db.Categories.AddRange(
@@ -94,13 +96,11 @@ try
             db.SaveChanges();
             Console.WriteLine("✓ Categorías seeded correctamente");
         }
-
         if (!db.Products.Any())
         {
             var guisos = db.Categories.First(c => c.Name == "Guisos").Id;
             var fritos = db.Categories.First(c => c.Name == "Fritos").Id;
             var mariscos = db.Categories.First(c => c.Name == "Mariscos").Id;
-
             db.Products.AddRange(
                 new Product { Name = "Pollo a la parrilla", Price = 13, CategoryId = fritos, Description = "Sale con papas fritas o papas sanchadas", ImageUrl = "assets/images/pollo_parrilla.jpg" },
                 new Product { Name = "Cabrito", Price = 15, CategoryId = guisos, Description = "Con frejol o mentestra", ImageUrl = "assets/images/cabrito.jpg" },
@@ -119,5 +119,4 @@ catch (Exception ex)
 }
 
 app.Urls.Add("http://0.0.0.0:5245");
-
 app.Run();

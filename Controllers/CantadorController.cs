@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace AppRestaurantAPI.Controllers
 {
@@ -32,11 +33,18 @@ namespace AppRestaurantAPI.Controllers
         {
             try
             {
-                var today = DateTime.UtcNow.Date;
+                // ✅ CORREGIDO: Límites del día basados en la zona horaria de Perú
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+                var todayInPeru = nowInPeru.Date;
 
-                // Órdenes activas (las que el cantador debe trackear)
+                var startOfDayPeruUtc = TimeZoneInfo.ConvertTimeToUtc(todayInPeru, peruTimeZone);
+                var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
+
+                // Órdenes activas usando el rango horario correcto
                 var activeOrders = await _context.Orders
-                    .Where(o => o.CreatedAt.Date == today &&
+                    .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
+                                o.CreatedAt < endOfDayPeruUtc &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)
@@ -118,12 +126,7 @@ namespace AppRestaurantAPI.Controllers
             }
         }
 
-        // Helper: parsea el string Entradas. Soporta múltiples formatos:
-        //   - "humita,ensalada rusa"          → 1 humita + 1 ensalada rusa
-        //   - "1x humita,2x ensalada rusa"    → 1 humita + 2 ensaladas rusas (formato del frontend actual)
-        //   - "humita x2"                     → 2 humitas (compatibilidad)
-        //   - ["humita","ensalada rusa"]      → JSON
-        //   - "humita;ensalada rusa"          → con punto y coma
+        // Helper para parsear entradas
         private static List<string> ParseEntradas(string entradasRaw)
         {
             var result = new List<string>();
@@ -132,7 +135,6 @@ namespace AppRestaurantAPI.Controllers
 
             List<string> rawItems;
 
-            // Intento JSON primero
             if (trimmed.StartsWith("["))
             {
                 try
@@ -146,9 +148,7 @@ namespace AppRestaurantAPI.Controllers
             }
             else
             {
-                // ✅ Separar por comas, punto y coma, saltos de línea (Windows \r\n o Unix \n)
                 rawItems = System.Text.RegularExpressions.Regex.Split(trimmed, @"[,;\r\n]+").ToList();
-                // Eliminar posibles strings vacíos
                 rawItems = rawItems.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
             }
 
@@ -159,7 +159,6 @@ namespace AppRestaurantAPI.Controllers
 
                 int multiplier = 1;
 
-                // Formato "2x ensalada rusa" o "2 x ensalada rusa"
                 var prefixMatch = System.Text.RegularExpressions.Regex.Match(item, @"^\s*(\d+)\s*x\s+(.+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 if (prefixMatch.Success)
                 {
@@ -168,7 +167,6 @@ namespace AppRestaurantAPI.Controllers
                 }
                 else
                 {
-                    // Formato "ensalada rusa x2"
                     var suffixMatch = System.Text.RegularExpressions.Regex.Match(item, @"(.+)\s*x\s*(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (suffixMatch.Success)
                     {
@@ -185,6 +183,7 @@ namespace AppRestaurantAPI.Controllers
 
             return result;
         }
+
         // ═══════════════════════════════════════════════════════════════════
         // GET: api/cantador/orders
         // Devuelve las órdenes del día activas, para el tab "POR MESA".
@@ -192,14 +191,23 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("orders")]
         public async Task<ActionResult<IEnumerable<Order>>> GetActiveOrders()
         {
-            var today = DateTime.UtcNow.Date;
+            // ✅ CORREGIDO: Rango horario de Perú para órdenes activas
+            var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+            var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+            var todayInPeru = nowInPeru.Date;
+
+            var startOfDayPeruUtc = TimeZoneInfo.ConvertTimeToUtc(todayInPeru, peruTimeZone);
+            var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
+
             var orders = await _context.Orders
-                .Where(o => o.CreatedAt.Date == today &&
+                .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
+                            o.CreatedAt < endOfDayPeruUtc &&
                             (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                 .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                 .OrderBy(o => o.CreatedAt)
                 .ToListAsync();
+
             return Ok(orders);
         }
 
@@ -210,14 +218,23 @@ namespace AppRestaurantAPI.Controllers
         [HttpGet("history")]
         public async Task<ActionResult<IEnumerable<Order>>> GetTodayHistory()
         {
-            var today = DateTime.UtcNow.Date;
+            // ✅ CORREGIDO: Rango horario de Perú para el Historial
+            var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+            var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+            var todayInPeru = nowInPeru.Date;
+
+            var startOfDayPeruUtc = TimeZoneInfo.ConvertTimeToUtc(todayInPeru, peruTimeZone);
+            var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
+
             var orders = await _context.Orders
-                .Where(o => o.CreatedAt.Date == today &&
+                .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
+                            o.CreatedAt < endOfDayPeruUtc &&
                             (o.Status == "Listo" || o.Status == "Cobrado" || o.Status == "Cancelado"))
                 .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
                 .OrderByDescending(o => o.UpdatedAt)
                 .ToListAsync();
+
             return Ok(orders);
         }
 
@@ -232,11 +249,18 @@ namespace AppRestaurantAPI.Controllers
         {
             try
             {
-                var today = DateTime.UtcNow.Date;
+                // ✅ CORREGIDO: Rango de fecha local de Perú
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+                var todayInPeru = nowInPeru.Date;
+
+                var startOfDayPeruUtc = TimeZoneInfo.ConvertTimeToUtc(todayInPeru, peruTimeZone);
+                var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
 
                 // Buscar la primera orden activa con ese producto pendiente (FIFO)
                 var candidateOrders = await _context.Orders
-                    .Where(o => o.CreatedAt.Date == today &&
+                    .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
+                                o.CreatedAt < endOfDayPeruUtc &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)
@@ -263,15 +287,14 @@ namespace AppRestaurantAPI.Controllers
 
                 // Descontar 1
                 targetItem.ServedQuantity += 1;
-                targetOrder.UpdatedAt = DateTime.UtcNow;
+                targetOrder.UpdatedAt = nowInPeru; // ✅ Guardar hora local corregida
                 _context.Update(targetItem);
 
-                // ✅ Verificar si todo está servido (segundos + entradas)
+                // Verificar si todo está servido (segundos + entradas)
                 bool allSegundosServed = (targetOrder.Items ?? new List<OrderItem>())
                     .All(i => i.ServedQuantity >= i.Quantity);
 
                 bool allEntradasServed = AreEntradasCompleted(targetOrder);
-
                 bool allServed = allSegundosServed && allEntradasServed;
 
                 if (allServed)
@@ -305,7 +328,6 @@ namespace AppRestaurantAPI.Controllers
 
                 if (allServed)
                 {
-                    // La mesa ya tiene su pedido listo — avisamos al mozo
                     await _hubContext.Clients.Group("Mozos")
                         .SendAsync("MesaCambio", new
                         {
@@ -333,9 +355,8 @@ namespace AppRestaurantAPI.Controllers
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // POST: api/cantador/serve-item-by-id
-        // Variante: descuenta 1 de un OrderItem específico (cuando el cantador
-        // está en el tab "POR MESA" y toca el [-] de un plato concreto).
+        // POST: api/cantador/serve-item-by-id/{orderItemId}
+        // Variante: descuenta 1 de un OrderItem específico.
         // ═══════════════════════════════════════════════════════════════════
         [HttpPost("serve-item-by-id/{orderItemId}")]
         public async Task<ActionResult<ServeItemResponse>> ServeItemById(int orderItemId)
@@ -359,23 +380,24 @@ namespace AppRestaurantAPI.Controllers
                 if (item.Order.Status != "Pendiente" && item.Order.Status != "Enviado a cocina")
                     return BadRequest($"La orden ya está en estado '{item.Order.Status}'");
 
+                // ✅ CORREGIDO: Uso de hora local de Perú para actualización
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+
                 item.ServedQuantity += 1;
-                item.Order.UpdatedAt = DateTime.UtcNow;
+                item.Order.UpdatedAt = nowInPeru;
                 _context.Update(item);
 
-                // Recargar todos los items de la orden para verificar si está completa
                 var allItems = await _context.OrderItems
                     .Where(i => i.OrderId == item.OrderId)
                     .ToListAsync();
 
-                // ✅ Verificar si todo está servido (segundos + entradas)
                 bool allSegundosServed = allItems.All(i =>
                     i.Id == item.Id
                         ? (item.ServedQuantity >= item.Quantity)
                         : (i.ServedQuantity >= i.Quantity));
 
                 bool allEntradasServed = AreEntradasCompleted(item.Order);
-
                 bool allServed = allSegundosServed && allEntradasServed;
 
                 if (allServed)
@@ -443,8 +465,12 @@ namespace AppRestaurantAPI.Controllers
                 var order = await _context.Orders.FindAsync(orderId);
                 if (order == null) return NotFound("Orden no encontrada");
 
+                // ✅ CORREGIDO: Uso de hora de Perú
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+
                 order.WasSung = true;
-                order.UpdatedAt = DateTime.UtcNow;
+                order.UpdatedAt = nowInPeru;
                 _context.Update(order);
                 await _context.SaveChangesAsync();
 
@@ -462,7 +488,6 @@ namespace AppRestaurantAPI.Controllers
         // ═══════════════════════════════════════════════════════════════════
         // POST: api/cantador/{orderId}/servir-entrada
         // Marca o desmarca una entrada como servida.
-        // Body: { "entradaName": "ensalada rusa", "servida": true }
         // ═══════════════════════════════════════════════════════════════════
         [HttpPost("{orderId}/servir-entrada")]
         public async Task<IActionResult> ServirEntrada(int orderId, [FromBody] ServirEntradaRequest request)
@@ -476,7 +501,6 @@ namespace AppRestaurantAPI.Controllers
 
                 if (order == null) return NotFound("Orden no encontrada");
 
-                // Parsear las entradas servidas actuales
                 var servidasActuales = new List<string>();
                 if (!string.IsNullOrWhiteSpace(order.EntradasServidas))
                 {
@@ -488,48 +512,44 @@ namespace AppRestaurantAPI.Controllers
                     catch { }
                 }
 
-                // Normalizar nombre de la entrada (minúsculas y trim)
                 var entradaNorm = request.EntradaName.ToLower().Trim();
 
                 if (request.Servida)
                 {
-                    // Contar cuántas unidades totales de esta entrada hay en la orden
                     var totalDeEstaEntrada = ParseEntradas(order.Entradas ?? "")
                         .Count(e => e.ToLower().Trim() == entradaNorm);
 
                     var yaServidasDeEsta = servidasActuales
                         .Count(e => e.ToLower().Trim() == entradaNorm);
 
-                    // Agregar UNA unidad si aún hay pendientes
                     if (yaServidasDeEsta < totalDeEstaEntrada)
                     {
-                        servidasActuales.Add(entradaNorm);  // Guardamos el nombre normalizado
-                        System.Diagnostics.Debug.WriteLine($"➕ Agregada entrada: {entradaNorm}. Total ahora: {string.Join(", ", servidasActuales)}");
+                        servidasActuales.Add(entradaNorm);
                     }
                 }
                 else
                 {
-                    // Quitar UNA ocurrencia (la primera encontrada)
                     var idx = servidasActuales.FindIndex(e => e.ToLower().Trim() == entradaNorm);
                     if (idx >= 0)
                     {
                         servidasActuales.RemoveAt(idx);
-                        System.Diagnostics.Debug.WriteLine($"➖ Removida entrada: {entradaNorm}. Total ahora: {string.Join(", ", servidasActuales)}");
                     }
                 }
 
+                // ✅ CORREGIDO: Capturar zona horaria peruana
+                var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+                var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
+
                 order.EntradasServidas = JsonConvert.SerializeObject(servidasActuales);
-                order.UpdatedAt = DateTime.UtcNow;
+                order.UpdatedAt = nowInPeru;
                 _context.Update(order);
                 await _context.SaveChangesAsync();
 
-                // Recargar orden con items para SignalR
                 var orderWithItems = await _context.Orders
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
-                // Verificar si todos los segundos Y todas las entradas están servidas
                 var allItems = await _context.OrderItems
                     .Where(i => i.OrderId == order.Id)
                     .ToListAsync();
@@ -538,24 +558,12 @@ namespace AppRestaurantAPI.Controllers
                 bool allEntradasServed = AreEntradasCompleted(order);
                 bool allServed = allSegundosServed && allEntradasServed;
 
-                // Logs de depuración con Debug.WriteLine
-                System.Diagnostics.Debug.WriteLine($"📊 ServirEntrada - OrderId:{order.Id}");
-                System.Diagnostics.Debug.WriteLine($"   Entradas totales (raw): {order.Entradas}");
-                System.Diagnostics.Debug.WriteLine($"   Entradas esperadas (expandidas): {string.Join(", ", ParseEntradas(order.Entradas ?? ""))}");
-                System.Diagnostics.Debug.WriteLine($"   Entradas servidas (guardadas): {string.Join(", ", servidasActuales)}");
-                System.Diagnostics.Debug.WriteLine($"   allSegundosServed: {allSegundosServed}");
-                System.Diagnostics.Debug.WriteLine($"   allEntradasServed: {allEntradasServed}");
-                System.Diagnostics.Debug.WriteLine($"   allServed: {allServed}");
-                System.Diagnostics.Debug.WriteLine($"   Status actual: {order.Status}");
-
                 if (allServed && order.Status != "Listo")
                 {
                     order.Status = "Listo";
-                    order.UpdatedAt = DateTime.UtcNow;
+                    order.UpdatedAt = nowInPeru;
                     _context.Update(order);
                     await _context.SaveChangesAsync();
-
-                    System.Diagnostics.Debug.WriteLine($"✅ Orden {order.Id} pasó a LISTO");
 
                     await _hubContext.Clients.Group("Mozos")
                         .SendAsync("MesaCambio", new
@@ -567,7 +575,6 @@ namespace AppRestaurantAPI.Controllers
                         .SendAsync("PedidoListo", orderWithItems);
                 }
 
-                // Notificaciones SignalR
                 await _hubContext.Clients.Group("Cocina")
                     .SendAsync("EntradaServida", new
                     {
@@ -596,23 +603,18 @@ namespace AppRestaurantAPI.Controllers
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"❌ Error en ServirEntrada: {ex.Message}");
                 return BadRequest($"Error: {ex.Message}");
             }
         }
-        // ═══════════════════════════════════════════════════════════════════
-        // ✅ MÉTODO HELPER CORREGIDO
-        // Verifica si TODAS las entradas de una orden están servidas
-        // ═══════════════════════════════════════════════════════════════════
+
+        // Helper: Verifica si las entradas están completadas
         private static bool AreEntradasCompleted(Order order)
         {
-            // Si no tiene entradas, no hay nada que verificar
             if (string.IsNullOrWhiteSpace(order.Entradas)) return true;
 
             var totalEntradas = ParseEntradas(order.Entradas);
             if (totalEntradas.Count == 0) return true;
 
-            // Parsear las entradas ya servidas
             var servidasActuales = new List<string>();
             if (!string.IsNullOrWhiteSpace(order.EntradasServidas))
             {
@@ -624,20 +626,13 @@ namespace AppRestaurantAPI.Controllers
                 catch { }
             }
 
-            // ✅ FIX: Normalizar AMBAS listas a minúsculas y trim ANTES de comparar
             var totalNorm = totalEntradas.Select(e => e.ToLower().Trim()).ToList();
             var servidasNorm = servidasActuales.Select(s => s.ToLower().Trim()).ToList();
 
-            // Verificar que cada entrada total tenga su correspondiente servida
             foreach (var entrada in totalNorm)
             {
                 int idx = servidasNorm.IndexOf(entrada);
-                if (idx < 0)
-                {
-                    // 🔍 Log para debugging
-                    Console.WriteLine($"⚠️ Entrada '{entrada}' aún no está servida");
-                    return false; // Esta entrada aún no fue servida
-                }
+                if (idx < 0) return false;
                 servidasNorm.RemoveAt(idx);
             }
 
