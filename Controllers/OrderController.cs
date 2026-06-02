@@ -43,6 +43,7 @@ namespace AppRestaurantAPI.Controllers
                 .Where(o => o.TableNumber == tableNumber)
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
+                .Include(o => o.History) // 🛑 AQUÍ ESTABA EL SECRETO PARA LAS RONDAS 🛑
                 .ToListAsync();
         }
 
@@ -353,8 +354,6 @@ namespace AppRestaurantAPI.Controllers
                     .OrderByDescending(o => o.Id)
                     .FirstOrDefaultAsync();
 
-                // ... EL RESTO DE TU CÓDIGO SE MANTIENE EXACTAMENTE IGUAL ...
-
                 var cashierOrders = await _context.Orders
                     .Where(o => o.WaiterName == "Caja")
                     .ToListAsync();
@@ -382,6 +381,12 @@ namespace AppRestaurantAPI.Controllers
                     orderToUse.Total += order.Total;
                     orderToUse.WasSung = false;
                     orderToUse.UpdatedAt = DateTime.UtcNow;
+
+                    // 🛑 CORRECCIÓN FINAL: Flutter ya manda el texto limpio con los saltos de línea y "(NUEVO)", solo lo reemplazamos
+                    if (!string.IsNullOrEmpty(order.Entradas))
+                    {
+                        orderToUse.Entradas = order.Entradas;
+                    }
 
                     if (order.Items != null)
                     {
@@ -664,9 +669,11 @@ namespace AppRestaurantAPI.Controllers
                 _context.OrderHistories.Add(historyEntry);
             }
 
-            // 🛑 2. NUEVA LÓGICA: ACTUALIZACIÓN DE ENTRADAS 🛑
+            // 🛑 2. NUEVA LÓGICA: ACTUALIZACIÓN DE ENTRADAS (REEMPLAZO DIRECTO) 🛑
             if (!string.IsNullOrEmpty(request.Entradas))
             {
+                // Como Flutter ya hizo la suma y nos envía el historial completo, 
+                // simplemente reemplazamos el texto en la base de datos.
                 order.Entradas = request.Entradas;
             }
 
@@ -679,9 +686,11 @@ namespace AppRestaurantAPI.Controllers
 
             await _context.SaveChangesAsync();
 
+            // 🛑 3. INCLUIR EL HISTORIAL PARA QUE ANGULAR ARME LAS RONDAS BIEN 🛑
             var orderWithItems = await _context.Orders
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
+                .Include(o => o.History) // <--- ESTO EVITA QUE SE DUPLIQUEN LOS SEGUNDOS EN PANTALLA
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
             await NotifyKitchen(orderWithItems);

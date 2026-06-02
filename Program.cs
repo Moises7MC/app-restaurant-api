@@ -2,11 +2,10 @@ using AppRestaurantAPI.Data;
 using AppRestaurantAPI.Hubs;
 using AppRestaurantAPI.Models;
 using Microsoft.EntityFrameworkCore;
-using Npgsql; // ← AGREGAR ESTO
+using Npgsql; 
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ✅ AGREGAR ESTA LÍNEA ANTES DE TODO - Soluciona el problema de timestamps
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 builder.Services.AddControllers()
