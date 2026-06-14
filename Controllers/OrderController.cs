@@ -331,10 +331,8 @@ namespace AppRestaurantAPI.Controllers
                 // 1. Obtenemos primero la zona horaria y la hora exacta de Perú (ej. 00:27)
                 var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
                 var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
-
-                // 2. Le asignamos ESA hora exacta directamente a la orden
-                order.CreatedAt = nowInPeru;
-                order.UpdatedAt = nowInPeru;
+                order.CreatedAt = DateTime.UtcNow;
+                order.UpdatedAt = DateTime.UtcNow;
 
                 Console.WriteLine("===== ORDER RECIBIDA =====");
                 Console.WriteLine(JsonConvert.SerializeObject(order, Formatting.Indented));

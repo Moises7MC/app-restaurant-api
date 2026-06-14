@@ -22,11 +22,12 @@ builder.Services.AddSignalR();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.SetIsOriginAllowed(_ => true)
+builder.Services.AddCors(options => {
+    options.AddPolicy("AllowAll", policy => {
+        policy.WithOrigins(
+                "http://localhost:4200",
+                "http://localhost:4200/dashboard/kitchen"
+              )
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();

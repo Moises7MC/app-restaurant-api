@@ -1,4 +1,5 @@
-﻿using AppRestaurantAPI.Models;
+﻿using AppRestaurantAPI.models;
+using AppRestaurantAPI.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace AppRestaurantAPI.Data
@@ -17,6 +18,7 @@ namespace AppRestaurantAPI.Data
         public DbSet<Waiter> Waiters { get; set; }
         // ✅ NUEVO
         public DbSet<DailyEntrada> DailyEntradas { get; set; }
+        public DbSet<MenuDelDiaItem> MenuDelDiaItems { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
