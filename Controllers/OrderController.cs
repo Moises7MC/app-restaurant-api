@@ -620,6 +620,62 @@ namespace AppRestaurantAPI.Controllers
             return NoContent();
         }
 
+        [HttpPost("{orderId}/entrada-adicional")]
+        public async Task<IActionResult> AgregarEntradaAdicional(
+            int orderId, [FromBody] EntradaAdicionalRequest request)
+        {
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.Items!)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null)
+                    return NotFound("Orden no encontrada");
+
+                if (order.Status == "Listo" || order.Status == "Cobrado")
+                    return BadRequest("No se puede modificar una orden ya cerrada");
+
+                // Deserializar lista actual de entradas adicionales
+                var adicionales = new List<string>();
+                if (!string.IsNullOrWhiteSpace(order.EntradasAdicionales))
+                {
+                    try
+                    {
+                        adicionales = JsonConvert.DeserializeObject<List<string>>(
+                            order.EntradasAdicionales) ?? new List<string>();
+                    }
+                    catch { }
+                }
+
+                // Agregar la nueva entrada adicional
+                adicionales.Add(request.Nombre.Trim());
+                order.EntradasAdicionales = JsonConvert.SerializeObject(adicionales);
+                order.UpdatedAt = DateTime.UtcNow;
+                _context.Update(order);
+                await _context.SaveChangesAsync();
+
+                var orderWithItems = await _context.Orders
+                    .Include(o => o.Items!)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                // Notificar a cocina y cantadores
+                await NotifyKitchen(orderWithItems);
+
+                return Ok(new
+                {
+                    orderId = order.Id,
+                    entradasAdicionales = adicionales
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error: {ex.Message}");
+            }
+        }
+
         [HttpPost("{orderId}/items-batch")]
         public async Task<ActionResult> AddItemsBatchToOrder(int orderId, [FromBody] AddItemsBatchRequest request)
         {
@@ -708,5 +764,9 @@ namespace AppRestaurantAPI.Controllers
     {
         public List<OrderItem> Items { get; set; } = new List<OrderItem>();
         public string? Entradas { get; set; } // Opcional, puede venir nulo
+    }
+    public class EntradaAdicionalRequest
+    {
+        public string Nombre { get; set; } = string.Empty;
     }
 }

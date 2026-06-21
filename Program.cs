@@ -2,10 +2,9 @@ using AppRestaurantAPI.Data;
 using AppRestaurantAPI.Hubs;
 using AppRestaurantAPI.Models;
 using Microsoft.EntityFrameworkCore;
-using Npgsql; 
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
-
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 builder.Services.AddControllers()
@@ -18,7 +17,6 @@ builder.Services.AddControllers()
 
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
-
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -40,8 +38,12 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseCors("AllowAll");
+app.UseAuthorization();
+app.MapControllers();
+app.MapHub<OrderHub>("/hubs/orders");
 
-// ✅ Fallback para Angular Router (soluciona el F5/recarga)
+// ✅ Fallback para Angular Router (va AL FINAL)
 app.Use(async (context, next) =>
 {
     await next();
@@ -56,11 +58,6 @@ app.Use(async (context, next) =>
         );
     }
 });
-
-app.UseCors("AllowAll");
-app.UseAuthorization();
-app.MapControllers();
-app.MapHub<OrderHub>("/hubs/orders");
 
 Console.WriteLine($"🔗 Conexión BD: {builder.Configuration.GetConnectionString("DefaultConnection")}");
 

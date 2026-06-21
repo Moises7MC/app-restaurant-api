@@ -118,7 +118,7 @@ namespace AppRestaurantAPI.Controllers
             return CreatedAtAction(nameof(GetTransaction), new { id = transaction.Id }, transaction);
         }
 
-        // POST: api/transaction/cobrar
+        // DESPUÉS:
         [HttpPost("cobrar")]
         public async Task<ActionResult> CobrarOrden(CobrarRequest request)
         {
@@ -132,11 +132,24 @@ namespace AppRestaurantAPI.Controllers
             var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
             var nowInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone);
 
+            // ✅ NUEVO: Si hay entradas adicionales con precio, usar el total enviado desde caja
+            var montoFinal = (request.TotalOverride.HasValue && request.TotalOverride.Value > order.Total)
+                ? request.TotalOverride.Value
+                : order.Total;
+
+            // ✅ NUEVO: Descripción que menciona entradas adicionales si las hay
+            var descripcion = $"Mesa {order.TableNumber} — {order.MealType}";
+            if (request.TotalOverride.HasValue && request.TotalOverride.Value > order.Total)
+            {
+                var adicional = request.TotalOverride.Value - order.Total;
+                descripcion += $" (+ S/. {adicional:F2} entradas adicionales)";
+            }
+
             var transaction = new Transaction
             {
                 Type = "ingreso",
-                Amount = order.Total,
-                Description = $"Mesa {order.TableNumber} — {order.MealType}",
+                Amount = montoFinal,
+                Description = descripcion,
                 TableNumber = order.TableNumber,
                 OrderId = order.Id,
                 PaymentMethod = request.PaymentMethod,
@@ -160,6 +173,7 @@ namespace AppRestaurantAPI.Controllers
 
             return Ok(new { message = "Cobro registrado correctamente", transactionId = transaction.Id });
         }
+
 
         // POST: api/transaction/gasto
         [HttpPost("gasto")]
@@ -248,6 +262,7 @@ namespace AppRestaurantAPI.Controllers
                     o.WaiterName,
                     o.CreatedAt,
                     o.Comanda,
+                    o.EntradasAdicionales,
                     Items = o.Items!.Select(i => new
                     {
                         i.Id,
@@ -544,6 +559,7 @@ namespace AppRestaurantAPI.Controllers
     {
         public int OrderId { get; set; }
         public string PaymentMethod { get; set; } = "Efectivo";
+        public decimal? TotalOverride { get; set; }
     }
 
     public class GastoRequest

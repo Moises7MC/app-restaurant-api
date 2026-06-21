@@ -28,5 +28,6 @@ namespace AppRestaurantAPI.Models
         public List<OrderHistory>? History { get; set; }
         /// Entradas ya servidas por el cantador (JSON: ["ensalada rusa","humita"])
         public string? EntradasServidas { get; set; }
+        public string? EntradasAdicionales { get; set; }
     }
 }

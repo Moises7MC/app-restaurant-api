@@ -516,8 +516,23 @@ namespace AppRestaurantAPI.Controllers
 
                 if (request.Servida)
                 {
-                    var totalDeEstaEntrada = ParseEntradas(order.Entradas ?? "")
+                    var totalNormales = ParseEntradas(order.Entradas ?? "")
                         .Count(e => e.ToLower().Trim() == entradaNorm);
+
+                    var adicionalesList = new List<string>();
+                    if (!string.IsNullOrWhiteSpace(order.EntradasAdicionales))
+                    {
+                        try
+                        {
+                            adicionalesList = JsonConvert.DeserializeObject<List<string>>(order.EntradasAdicionales)
+                                ?? new List<string>();
+                        }
+                        catch { }
+                    }
+                    var totalAdicionales = adicionalesList
+                        .Count(e => e.ToLower().Trim() == entradaNorm);
+
+                    var totalDeEstaEntrada = totalNormales + totalAdicionales;
 
                     var yaServidasDeEsta = servidasActuales
                         .Count(e => e.ToLower().Trim() == entradaNorm);
