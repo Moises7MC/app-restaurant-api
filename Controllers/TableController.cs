@@ -44,23 +44,33 @@ namespace AppRestaurantAPI.Controllers
                 .Distinct()
                 .ToListAsync();
 
+            var activeOrders = await _context.Orders
+            .Where(o => o.CreatedAt.Date == todayUtc &&
+                        (o.Status == "Enviado a cocina" || o.Status == "Pendiente"))
+            .Select(o => new { o.TableNumber, o.WaiterName })
+            .ToListAsync();
+
             var floors = tables
-                .GroupBy(t => t.Floor)
-                .OrderBy(g => g.Key)
-                .Select(g => new
-                {
-                    floor = g.Key,
-                    floorName = $"Piso {g.Key}",
-                    tables = g.Select(t => new
-                    {
-                        t.Id,
-                        t.TableNumber,
-                        t.Capacity,
-                        t.Floor,
-                        isOccupied = occupiedNumbers.Contains(t.TableNumber)
-                    }).ToList()
-                })
-                .ToList();
+    .GroupBy(t => t.Floor)
+    .OrderBy(g => g.Key)
+    .Select(g => new
+    {
+        floor = g.Key,
+        floorName = $"Piso {g.Key}",
+        tables = g.Select(t => new
+        {
+            t.Id,
+            t.TableNumber,
+            t.Capacity,
+            t.Floor,
+            isOccupied = occupiedNumbers.Contains(t.TableNumber),
+            // ✅ NUEVO: nombre del mozo que atiende esta mesa
+            waiterName = activeOrders
+                .FirstOrDefault(o => o.TableNumber == t.TableNumber)
+                ?.WaiterName ?? ""
+        }).ToList()
+    })
+    .ToList();
 
             return Ok(floors);
         }

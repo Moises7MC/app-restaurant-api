@@ -263,6 +263,7 @@ namespace AppRestaurantAPI.Controllers
                     o.CreatedAt,
                     o.Comanda,
                     o.EntradasAdicionales,
+                    o.IsParaLlevar, 
                     Items = o.Items!.Select(i => new
                     {
                         i.Id,
