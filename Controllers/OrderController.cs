@@ -40,7 +40,7 @@ namespace AppRestaurantAPI.Controllers
         public async Task<ActionResult<IEnumerable<Order>>> GetOrdersByTable(int tableNumber)
         {
             return await _context.Orders
-                .Where(o => o.TableNumber == tableNumber)
+                .Where(o => o.TableNumber == tableNumber && !o.IsDeleted)
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .Include(o => o.History) // 🛑 AQUÍ ESTABA EL SECRETO PARA LAS RONDAS 🛑
@@ -91,7 +91,9 @@ namespace AppRestaurantAPI.Controllers
                     h.OrderId,
                     h.Action,
                     h.RoundNumber,
+                    h.WaiterName,
                     h.CreatedAt,
+                    h.ItemsAdded,
 
                     Items = string.IsNullOrEmpty(h.ItemsAdded)
                     ? new List<OrderHistoryItemResultDto>()
@@ -152,6 +154,9 @@ namespace AppRestaurantAPI.Controllers
 
                 if (order == null)
                     return NotFound("Orden no encontrada");
+
+                if (order.IsDeleted)
+                    return BadRequest("Esta orden fue eliminada");
 
                 if (order.Status == "Listo")
                     return BadRequest("No se puede modificar una orden ya lista");
@@ -249,6 +254,9 @@ namespace AppRestaurantAPI.Controllers
                 if (order == null)
                     return NotFound("Orden no encontrada");
 
+                if (order.IsDeleted)
+                    return BadRequest("Esta orden fue eliminada");
+
                 if (order.Status == "Listo")
                     return BadRequest("No se puede modificar una orden ya lista");
 
@@ -343,11 +351,15 @@ namespace AppRestaurantAPI.Controllers
                 var endOfDayPeruUtc = startOfDayPeruUtc.AddDays(1);
 
                 // Buscamos la última orden de la misma mesa...
-                var lastOrderToday = order.WaiterName == "Caja" ? null : await _context.Orders
+                // 🛑 Los pedidos SEPARADOS nunca se fusionan aquí: cada uno es una cuenta
+                //    independiente y siempre crea una orden nueva con su propia letra.
+                var lastOrderToday = (order.WaiterName == "Caja" || order.IsSeparado) ? null : await _context.Orders
                     .Where(o => o.TableNumber == order.TableNumber &&
                                 o.CreatedAt >= startOfDayPeruUtc &&
                                 o.CreatedAt < endOfDayPeruUtc &&
                                 o.IsParaLlevar == order.IsParaLlevar &&
+                                !o.IsSeparado &&
+                                !o.IsDeleted &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .OrderByDescending(o => o.Id)
                     .FirstOrDefaultAsync();
@@ -379,6 +391,7 @@ namespace AppRestaurantAPI.Controllers
                     orderToUse.Total += order.Total;
                     orderToUse.WasSung = false;
                     orderToUse.UpdatedAt = DateTime.UtcNow;
+                    orderToUse.LastEditedByWaiter = order.WaiterName;
 
                     // 🛑 CORRECCIÓN FINAL: Flutter ya manda el texto limpio con los saltos de línea y "(NUEVO)", solo lo reemplazamos
                     if (!string.IsNullOrEmpty(order.Entradas))
@@ -412,6 +425,7 @@ namespace AppRestaurantAPI.Controllers
                         OrderId = orderToUse.Id,
                         Action = "Agregado",
                         ItemsAdded = itemsAddedJson,
+                        WaiterName = order.WaiterName,
                         CreatedAt = DateTime.UtcNow
                     };
                     _context.OrderHistories.Add(historyEntry);
@@ -430,6 +444,20 @@ namespace AppRestaurantAPI.Controllers
                     if (anyLastToday != null)
                         order.Comanda = (char)(anyLastToday.Comanda + 1);
 
+                    // 🛑 Asignar letra correlativa (A, B, C...) a los pedidos SEPARADOS de esta mesa
+                    if (order.IsSeparado)
+                    {
+                        var separadosCountHoy = await _context.Orders
+                            .Where(o => o.TableNumber == order.TableNumber &&
+                                        o.CreatedAt >= startOfDayPeruUtc &&
+                                        o.CreatedAt < endOfDayPeruUtc &&
+                                        o.IsSeparado)
+                            .CountAsync();
+
+                        order.TableSuffix = ((char)('A' + separadosCountHoy)).ToString();
+                    }
+
+                    order.LastEditedByWaiter = order.WaiterName;
                     _context.Orders.Add(order);
                     orderToUse = order;
                 }
@@ -450,6 +478,7 @@ namespace AppRestaurantAPI.Controllers
                         OrderId = orderToUse.Id,
                         Action = "Inicial",
                         ItemsAdded = JsonConvert.SerializeObject(itemsSnapshot),
+                        WaiterName = order.WaiterName,
                         CreatedAt = orderToUse.CreatedAt
                     };
                     _context.OrderHistories.Add(historyEntry);
@@ -521,6 +550,9 @@ namespace AppRestaurantAPI.Controllers
             if (order == null)
                 return NotFound("Order no encontrada");
 
+            if (order.IsDeleted)
+                return BadRequest("Esta orden fue eliminada");
+
             item.OrderId = orderId;
             _context.OrderItems.Add(item);
             await _context.SaveChangesAsync();
@@ -555,6 +587,9 @@ namespace AppRestaurantAPI.Controllers
 
             if (order == null)
                 return NotFound();
+
+            if (order.IsDeleted)
+                return BadRequest("Esta orden fue eliminada");
 
             if (order.TableNumber == 0 && order.WaiterName == "Caja")
             {
@@ -608,6 +643,20 @@ namespace AppRestaurantAPI.Controllers
             return NoContent();
         }
 
+        // ═══════════════════════════════════════════════════════════════════════════════
+        // Eliminar un pedido (solo desde la web) — pedidos que se confundieron o
+        // cuyo cliente se fue. Se puede "eliminar" en cualquier estado, incluso ya
+        // "Cobrado": en ese caso también se elimina la transacción de caja asociada
+        // para que Caja y Reportes no queden descuadrados.
+        //
+        // 🛑 BORRADO LÓGICO (no físico): el pedido NO se borra de la base de datos,
+        // solo se marca IsDeleted = true. Sigue apareciendo en Cocina (tachado en
+        // rojo por el frontend) para que el dueño pueda auditar qué se eliminó y
+        // detectar abuso (ej. un cajero que cobra en efectivo y luego "elimina" el
+        // pedido para que no quede rastro). Se excluye de mesas, cantador, caja y
+        // reportes como si nunca hubiera existido para efectos operativos/contables.
+        // DELETE: api/order/{id}
+        // ═══════════════════════════════════════════════════════════════════════════════
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteOrder(int id)
         {
@@ -615,8 +664,38 @@ namespace AppRestaurantAPI.Controllers
             if (order == null)
                 return NotFound();
 
-            _context.Orders.Remove(order);
+            if (order.IsDeleted)
+                return NoContent();
+
+            var tableNumber = order.TableNumber;
+            var isParaLlevar = order.IsParaLlevar;
+
+            var transactions = await _context.Transactions
+                .Where(t => t.OrderId == id)
+                .ToListAsync();
+            if (transactions.Count > 0)
+                _context.Transactions.RemoveRange(transactions);
+
+            order.IsDeleted = true;
+            order.DeletedAt = DateTime.UtcNow;
+            order.UpdatedAt = DateTime.UtcNow;
+            _context.Update(order);
             await _context.SaveChangesAsync();
+
+            await _hubContext.Clients.Group("Cocina")
+                .SendAsync("OrderStatusChanged", new { orderId = id, status = "Eliminado" });
+            await _hubContext.Clients.Group("Cantadores")
+                .SendAsync("OrderStatusChanged", new { orderId = id, status = "Eliminado" });
+
+            if (!isParaLlevar && tableNumber > 0 && tableNumber <= 100)
+            {
+                await _hubContext.Clients.Group("Mozos")
+                    .SendAsync("MesaCambio", new { tableNumber, isOccupied = false });
+            }
+
+            if (transactions.Count > 0)
+                await _hubContext.Clients.All.SendAsync("CajaActualizada");
+
             return NoContent();
         }
 
@@ -633,6 +712,9 @@ namespace AppRestaurantAPI.Controllers
 
                 if (order == null)
                     return NotFound("Orden no encontrada");
+
+                if (order.IsDeleted)
+                    return BadRequest("Esta orden fue eliminada");
 
                 if (order.Status == "Listo" || order.Status == "Cobrado")
                     return BadRequest("No se puede modificar una orden ya cerrada");
@@ -686,6 +768,9 @@ namespace AppRestaurantAPI.Controllers
             if (order == null)
                 return NotFound("Orden no encontrada");
 
+            if (order.IsDeleted)
+                return BadRequest("Esta orden fue eliminada");
+
             // 1. Manejo de los ítems (segundos)
             if (request.Items != null && request.Items.Count > 0)
             {
@@ -718,6 +803,7 @@ namespace AppRestaurantAPI.Controllers
                     OrderId = orderId,
                     Action = "Agregado",
                     ItemsAdded = JsonConvert.SerializeObject(snapshot),
+                    WaiterName = request.WaiterName,
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.OrderHistories.Add(historyEntry);
@@ -726,7 +812,7 @@ namespace AppRestaurantAPI.Controllers
             // 🛑 2. NUEVA LÓGICA: ACTUALIZACIÓN DE ENTRADAS (REEMPLAZO DIRECTO) 🛑
             if (!string.IsNullOrEmpty(request.Entradas))
             {
-                // Como Flutter ya hizo la suma y nos envía el historial completo, 
+                // Como Flutter ya hizo la suma y nos envía el historial completo,
                 // simplemente reemplazamos el texto en la base de datos.
                 order.Entradas = request.Entradas;
             }
@@ -735,6 +821,7 @@ namespace AppRestaurantAPI.Controllers
             if ((request.Items != null && request.Items.Count > 0) || !string.IsNullOrEmpty(request.Entradas))
             {
                 order.WasSung = false;
+                order.LastEditedByWaiter = request.WaiterName;
                 _context.Update(order);
             }
 
@@ -764,6 +851,7 @@ namespace AppRestaurantAPI.Controllers
     {
         public List<OrderItem> Items { get; set; } = new List<OrderItem>();
         public string? Entradas { get; set; } // Opcional, puede venir nulo
+        public string? WaiterName { get; set; } // Mozo que envía esta tanda
     }
     public class EntradaAdicionalRequest
     {

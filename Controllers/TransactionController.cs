@@ -127,6 +127,7 @@ namespace AppRestaurantAPI.Controllers
                 .FirstOrDefaultAsync(o => o.Id == request.OrderId);
 
             if (order == null) return NotFound("Orden no encontrada");
+            if (order.IsDeleted) return BadRequest("Esta orden fue eliminada");
             if (order.Status == "Cobrado") return BadRequest("Esta orden ya fue cobrada");
 
             var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
@@ -138,7 +139,7 @@ namespace AppRestaurantAPI.Controllers
                 : order.Total;
 
             // ✅ NUEVO: Descripción que menciona entradas adicionales si las hay
-            var descripcion = $"Mesa {order.TableNumber} — {order.MealType}";
+            var descripcion = $"Mesa {order.TableNumber}{order.TableSuffix}{(order.IsParaLlevar ? " (Para llevar)" : "")} — {order.MealType}";
             if (request.TotalOverride.HasValue && request.TotalOverride.Value > order.Total)
             {
                 var adicional = request.TotalOverride.Value - order.Total;
@@ -151,6 +152,8 @@ namespace AppRestaurantAPI.Controllers
                 Amount = montoFinal,
                 Description = descripcion,
                 TableNumber = order.TableNumber,
+                TableSuffix = order.TableSuffix,
+                IsParaLlevar = order.IsParaLlevar,
                 OrderId = order.Id,
                 PaymentMethod = request.PaymentMethod,
                 CreatedAt = nowInPeru
@@ -250,7 +253,7 @@ namespace AppRestaurantAPI.Controllers
             var ordenes = await _context.Orders
                 .Include(o => o.Items)
                     .ThenInclude(i => i.Product)
-                .Where(o => o.CreatedAt >= startOfDayPeruUtc && o.CreatedAt < endOfDayPeruUtc && o.Status == "Listo")
+                .Where(o => o.CreatedAt >= startOfDayPeruUtc && o.CreatedAt < endOfDayPeruUtc && o.Status == "Listo" && !o.IsDeleted)
                 .OrderBy(o => o.TableNumber)
                 .Select(o => new
                 {
@@ -263,7 +266,9 @@ namespace AppRestaurantAPI.Controllers
                     o.CreatedAt,
                     o.Comanda,
                     o.EntradasAdicionales,
-                    o.IsParaLlevar, 
+                    o.IsParaLlevar,
+                    o.IsSeparado,
+                    o.TableSuffix,
                     Items = o.Items!.Select(i => new
                     {
                         i.Id,

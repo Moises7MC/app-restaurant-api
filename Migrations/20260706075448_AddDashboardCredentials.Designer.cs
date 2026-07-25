@@ -3,6 +3,7 @@ using System;
 using AppRestaurantAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AppRestaurantAPI.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706075448_AddDashboardCredentials")]
+    partial class AddDashboardCredentials
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -109,9 +112,6 @@ namespace AppRestaurantAPI.Migrations
                     b.Property<int>("CustomerCount")
                         .HasColumnType("integer");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("timestamp without time zone");
-
                     b.Property<string>("Entradas")
                         .HasColumnType("text");
 
@@ -121,17 +121,11 @@ namespace AppRestaurantAPI.Migrations
                     b.Property<string>("EntradasServidas")
                         .HasColumnType("text");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsParaLlevar")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsSeparado")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("LastEditedByWaiter")
-                        .HasColumnType("text");
 
                     b.Property<string>("MealType")
                         .IsRequired()
@@ -471,9 +465,6 @@ namespace AppRestaurantAPI.Migrations
 
                     b.Property<int?>("RoundNumber")
                         .HasColumnType("integer");
-
-                    b.Property<string>("WaiterName")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 

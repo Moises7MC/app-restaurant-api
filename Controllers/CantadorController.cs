@@ -45,6 +45,7 @@ namespace AppRestaurantAPI.Controllers
                 var activeOrders = await _context.Orders
                     .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
                                 o.CreatedAt < endOfDayPeruUtc &&
+                                !o.IsDeleted &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)
@@ -202,6 +203,7 @@ namespace AppRestaurantAPI.Controllers
             var orders = await _context.Orders
                 .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
                             o.CreatedAt < endOfDayPeruUtc &&
+                            !o.IsDeleted &&
                             (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                 .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
@@ -229,6 +231,7 @@ namespace AppRestaurantAPI.Controllers
             var orders = await _context.Orders
                 .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
                             o.CreatedAt < endOfDayPeruUtc &&
+                            !o.IsDeleted &&
                             (o.Status == "Listo" || o.Status == "Cobrado" || o.Status == "Cancelado"))
                 .Include(o => o.Items!)
                     .ThenInclude(oi => oi.Product)
@@ -261,6 +264,7 @@ namespace AppRestaurantAPI.Controllers
                 var candidateOrders = await _context.Orders
                     .Where(o => o.CreatedAt >= startOfDayPeruUtc &&
                                 o.CreatedAt < endOfDayPeruUtc &&
+                                !o.IsDeleted &&
                                 (o.Status == "Pendiente" || o.Status == "Enviado a cocina"))
                     .Include(o => o.Items!)
                         .ThenInclude(oi => oi.Product)

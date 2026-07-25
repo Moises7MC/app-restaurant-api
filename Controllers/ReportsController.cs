@@ -21,22 +21,35 @@ namespace AppRestaurantAPI.Controllers
 
         // ═══════════════════════════════════════════════════════════════════
         // Helper: parsear fechas y construir filtro base
+        // 🛑 CORREGIDO: Order.CreatedAt se guarda en UTC, pero "hoy"/el rango de
+        //    fechas debe calcularse en hora de Perú (igual que en OrderController
+        //    y CantadorController). Antes se usaba DateTime.Today (hora del
+        //    servidor) y se comparaba directo contra CreatedAt en UTC — entre
+        //    ~7pm y 12am hora Perú el CreatedAt ya cae en el día UTC siguiente,
+        //    quedando fuera del rango y devolviendo reportes vacíos.
         // ═══════════════════════════════════════════════════════════════════
         private (DateTime from, DateTime to) ParseDateRange(string? fromStr, string? toStr)
         {
-            DateTime from, to;
+            var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+            var todayInPeru = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, peruTimeZone).Date;
+
+            DateTime fromLocal, toLocal;
 
             if (!string.IsNullOrEmpty(fromStr) && DateTime.TryParse(fromStr, out var f))
-                from = f.Date;
+                fromLocal = f.Date;
             else
-                from = DateTime.Today;
+                fromLocal = todayInPeru;
 
             if (!string.IsNullOrEmpty(toStr) && DateTime.TryParse(toStr, out var t))
-                to = t.Date.AddDays(1).AddTicks(-1); // hasta el final del día
+                toLocal = t.Date;
             else
-                to = from.AddDays(1).AddTicks(-1);
+                toLocal = fromLocal;
 
-            return (from, to);
+            // Convertimos los límites (hora local de Perú) a UTC, que es como se guarda CreatedAt
+            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromLocal, peruTimeZone);
+            var toUtc = TimeZoneInfo.ConvertTimeToUtc(toLocal.AddDays(1), peruTimeZone).AddTicks(-1);
+
+            return (fromUtc, toUtc);
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -51,7 +64,7 @@ namespace AppRestaurantAPI.Controllers
             var orders = await _context.Orders
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
-                .Where(o => o.Status == "Cobrado" &&
+                .Where(o => o.Status == "Cobrado" && !o.IsDeleted &&
                             o.CreatedAt >= fromDate &&
                             o.CreatedAt <= toDate)
                 .ToListAsync();
@@ -96,7 +109,7 @@ namespace AppRestaurantAPI.Controllers
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .ThenInclude(p => p!.Category)
-                .Where(o => o.Status == "Cobrado" &&
+                .Where(o => o.Status == "Cobrado" && !o.IsDeleted &&
                             o.CreatedAt >= fromDate &&
                             o.CreatedAt <= toDate)
                 .ToListAsync();
@@ -145,7 +158,7 @@ namespace AppRestaurantAPI.Controllers
                 .Include(o => o.Items!)
                 .ThenInclude(oi => oi.Product)
                 .ThenInclude(p => p!.Category)
-                .Where(o => o.Status == "Cobrado" &&
+                .Where(o => o.Status == "Cobrado" && !o.IsDeleted &&
                             o.CreatedAt >= fromDate &&
                             o.CreatedAt <= toDate)
                 .ToListAsync();
@@ -191,7 +204,7 @@ namespace AppRestaurantAPI.Controllers
 
             var orders = await _context.Orders
                 .Include(o => o.Items)
-                .Where(o => o.Status == "Cobrado" &&
+                .Where(o => o.Status == "Cobrado" && !o.IsDeleted &&
                             o.CreatedAt >= fromDate &&
                             o.CreatedAt <= toDate)
                 .ToListAsync();
@@ -223,16 +236,18 @@ namespace AppRestaurantAPI.Controllers
 
             var orders = await _context.Orders
                 .Include(o => o.Items)
-                .Where(o => o.Status == "Cobrado" &&
+                .Where(o => o.Status == "Cobrado" && !o.IsDeleted &&
                             o.CreatedAt >= fromDate &&
                             o.CreatedAt <= toDate)
                 .ToListAsync();
 
+            var peruTimeZone = TimeZoneInfo.FindSystemTimeZoneById("America/Lima");
+
             var grouped = orders
                 .Select(o => new
                 {
-                    // Usar la hora directamente sin conversión de zona horaria
-                    hour = o.CreatedAt.Hour,
+                    // 🛑 CORREGIDO: CreatedAt está en UTC, se convierte a hora de Perú
+                    hour = TimeZoneInfo.ConvertTimeFromUtc(o.CreatedAt, peruTimeZone).Hour,
                     o.Total,
                     platos = (o.Items ?? new List<Models.OrderItem>()).Sum(i => i.Quantity)
                 })

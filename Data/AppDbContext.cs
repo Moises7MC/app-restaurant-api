@@ -19,6 +19,8 @@ namespace AppRestaurantAPI.Data
         // ✅ NUEVO
         public DbSet<DailyEntrada> DailyEntradas { get; set; }
         public DbSet<MenuDelDiaItem> MenuDelDiaItems { get; set; }
+        public DbSet<RestaurantSettings> RestaurantSettings { get; set; }
+        public DbSet<InventoryItem> InventoryItems { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -57,6 +59,16 @@ namespace AppRestaurantAPI.Data
             // ✅ índice por fecha para consultas rápidas
             modelBuilder.Entity<DailyEntrada>()
                 .HasIndex(e => e.Date);
+
+            // ✅ Defaults explícitos para que la migración rellene la fila
+            // existente de RestaurantSettings al agregar estas columnas.
+            modelBuilder.Entity<RestaurantSettings>()
+                .Property(s => s.AdminUsername)
+                .HasDefaultValue("admin");
+
+            modelBuilder.Entity<RestaurantSettings>()
+                .Property(s => s.AdminPassword)
+                .HasDefaultValue("comoencasa");
         }
     }
 }

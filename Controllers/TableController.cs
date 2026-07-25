@@ -38,7 +38,7 @@ namespace AppRestaurantAPI.Controllers
             // Mesas ocupadas hoy por órdenes activas
             var todayUtc = DateTime.UtcNow.Date;
             var occupiedNumbers = await _context.Orders
-                .Where(o => o.CreatedAt.Date == todayUtc &&
+                .Where(o => o.CreatedAt.Date == todayUtc && !o.IsDeleted &&
                             (o.Status == "Enviado a cocina" || o.Status == "Pendiente"))
                 .Select(o => o.TableNumber)
                 .Distinct()

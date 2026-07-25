@@ -3,6 +3,7 @@ using System;
 using AppRestaurantAPI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AppRestaurantAPI.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706045601_AddTableSuffixToTransactions")]
+    partial class AddTableSuffixToTransactions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -49,49 +52,6 @@ namespace AppRestaurantAPI.Migrations
                     b.ToTable("Categories");
                 });
 
-            modelBuilder.Entity("AppRestaurantAPI.Models.InventoryItem", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<decimal>("CurrentStock")
-                        .HasColumnType("numeric");
-
-                    b.Property<decimal>("MinStock")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Unit")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("UnitCost")
-                        .HasColumnType("numeric");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("InventoryItems");
-                });
-
             modelBuilder.Entity("AppRestaurantAPI.Models.Order", b =>
                 {
                     b.Property<int>("Id")
@@ -109,9 +69,6 @@ namespace AppRestaurantAPI.Migrations
                     b.Property<int>("CustomerCount")
                         .HasColumnType("integer");
 
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("timestamp without time zone");
-
                     b.Property<string>("Entradas")
                         .HasColumnType("text");
 
@@ -121,17 +78,11 @@ namespace AppRestaurantAPI.Migrations
                     b.Property<string>("EntradasServidas")
                         .HasColumnType("text");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsParaLlevar")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsSeparado")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("LastEditedByWaiter")
-                        .HasColumnType("text");
 
                     b.Property<string>("MealType")
                         .IsRequired()
@@ -235,37 +186,6 @@ namespace AppRestaurantAPI.Migrations
                     b.ToTable("Products");
                 });
 
-            modelBuilder.Entity("AppRestaurantAPI.Models.RestaurantSettings", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AdminPassword")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("comoencasa");
-
-                    b.Property<string>("AdminUsername")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("admin");
-
-                    b.Property<int>("DangerMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("WarningMinutes")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RestaurantSettings");
-                });
-
             modelBuilder.Entity("AppRestaurantAPI.Models.Table", b =>
                 {
                     b.Property<int>("Id")
@@ -314,9 +234,6 @@ namespace AppRestaurantAPI.Migrations
                         .HasColumnType("text");
 
                     b.Property<bool>("IsClosed")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsParaLlevar")
                         .HasColumnType("boolean");
 
                     b.Property<int?>("OrderId")
@@ -471,9 +388,6 @@ namespace AppRestaurantAPI.Migrations
 
                     b.Property<int?>("RoundNumber")
                         .HasColumnType("integer");
-
-                    b.Property<string>("WaiterName")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
